@@ -9,9 +9,8 @@
 **Status:** Source of Truth
 
 > This document defines the complete visual language, interaction model,
-and user experience principles of IoTOS AI. Every UI decision must
-align with this document.
-> 
+> and user experience principles of IoTOS AI. Every UI decision must
+> align with this document.
 
 ---
 
@@ -64,7 +63,6 @@ AI Copilot for Embedded Development.
 **Brand Promise**
 
 > Describe → Generate → Upload → Run
-> 
 
 **Brand Attributes**
 
@@ -627,7 +625,6 @@ Every screen should answer:
 Every visual decision must strengthen one experience:
 
 > **Describe → Generate → Upload → Run**
-> 
 
 If a design element does not improve that journey, simplify it or remove
 it.

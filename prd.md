@@ -17,7 +17,6 @@ Instead of forcing users to learn multiple disconnected tools, IoTOS AI provides
 Prototype V0.1 validates one seamless workflow:
 
 > **Describe → Generate → Upload → Run**
-> 
 
 ---
 
@@ -38,7 +37,6 @@ Reduce the learning curve of embedded development through a single intelligent d
 Every feature must answer:
 
 > **Does this make embedded development easier for beginners?**
-> 
 
 If the answer is no, it does not belong.
 
@@ -299,9 +297,7 @@ If a beginner can describe an idea, generate firmware, upload it and immediately
 IoTOS AI proves one idea:
 
 > **Embedded development should feel as natural as describing an idea.**
-> 
 
 Every engineering decision should strengthen:
 
 > **Describe → Generate → Upload → Run**
-> 

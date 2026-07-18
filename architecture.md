@@ -54,7 +54,6 @@ Prototype V0.1 intentionally avoids:
 # 4. Engineering Philosophy
 
 > **Build for tomorrow. Ship today.**
-> 
 
 The architecture must support the future product while implementing only
 the Investor Demo (V0.1).
@@ -164,17 +163,17 @@ Device Monitor
 
 # 9. Technology Stack
 
-| Technology | Purpose |
-| --- | --- |
-| Electron | Desktop runtime |
-| React | User Interface |
-| TypeScript | Type safety |
-| Vite | Build tool |
-| Tailwind CSS | Styling |
-| Zustand | State management |
-| Monaco Editor | Firmware editor |
-| Arduino CLI | Compile & Upload |
-| serialport | USB communication |
+| Technology            | Purpose                |
+| --------------------- | ---------------------- |
+| Electron              | Desktop runtime        |
+| React                 | User Interface         |
+| TypeScript            | Type safety            |
+| Vite                  | Build tool             |
+| Tailwind CSS          | Styling                |
+| Zustand               | State management       |
+| Monaco Editor         | Firmware editor        |
+| Arduino CLI           | Compile & Upload       |
+| serialport            | USB communication      |
 | OpenAI-compatible API | AI firmware generation |
 
 ---
@@ -544,7 +543,6 @@ existing ones.
 Every architectural decision must strengthen one experience:
 
 > **Describe → Generate → Upload → Run**
-> 
 
 If a feature does not improve that workflow, defer it to a future
 version.

@@ -375,4 +375,3 @@ It is to demonstrate one seamless, dependable workflow that proves the core visi
 Every completed phase should bring the product one step closer to making this promise a reality:
 
 > **Describe → Generate → Upload → Run**
-> 

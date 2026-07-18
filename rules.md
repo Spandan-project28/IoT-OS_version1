@@ -287,7 +287,7 @@ Architecture changes require documentation updates in the same commit.
 
 Documentation is treated as production code.
 
-Comments should explain *why*, not *what*.
+Comments should explain _why_, not _what_.
 
 ---
 
@@ -368,7 +368,6 @@ Features alone are not success.
 Every engineering decision must strengthen one promise:
 
 > **Describe → Generate → Upload → Run**
-> 
 
 If a feature, dependency, abstraction, or architectural decision does
 not strengthen that workflow, postpone it.

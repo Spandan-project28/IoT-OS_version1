@@ -3,7 +3,7 @@
 **Project:** IoTOS AI  
 **Document:** Project Memory & Engineering Journal  
 **Version:** 2.0  
-**Status:** Living Document  
+**Status:** Living Document
 
 ---
 
@@ -16,6 +16,7 @@ It exists so that no important engineering knowledge is ever lost.
 # Objectives
 
 Record:
+
 - Architectural decisions
 - Lessons learned
 - Technical discoveries
@@ -34,7 +35,7 @@ Never duplicate information from the other documentation. Record changes and rea
 
 **Project:** IoTOS AI  
 **Tagline:** The AI Copilot for Arduino & ESP32 Development  
-**Prototype:** V0.1  
+**Prototype:** V0.1
 
 ## Core Promise
 
@@ -42,20 +43,21 @@ Never duplicate information from the other documentation. Record changes and rea
 
 ## Documentation Relationships
 
-| Document | Purpose |
-| --- | --- |
-| PRD.md | Product vision |
-| ARCHITECTURE.md | System architecture |
-| RULES.md | Engineering standards |
-| DESIGN.md | Design system |
-| PHASES.md | Execution roadmap |
-| MEMORY.md | Historical knowledge |
+| Document        | Purpose               |
+| --------------- | --------------------- |
+| PRD.md          | Product vision        |
+| ARCHITECTURE.md | System architecture   |
+| RULES.md        | Engineering standards |
+| DESIGN.md       | Design system         |
+| PHASES.md       | Execution roadmap     |
+| MEMORY.md       | Historical knowledge  |
 
 ---
 
 # Architecture Decision Records (ADR)
 
 ### ADR-001
+
 - **Status:** Accepted
 - **Decision:** Electron is the desktop framework.
 - **Reason:**
@@ -67,20 +69,34 @@ Never duplicate information from the other documentation. Record changes and rea
   - Flutter
 
 ### ADR-002
+
 - Arduino CLI is the official firmware toolchain.
 
 ### ADR-003
+
 - Monaco Editor provides the firmware editing experience.
 
 ### ADR-004
+
 - Prototype V0.1 is local-first.
 - Cloud infrastructure is intentionally excluded.
+
+### ADR-005
+
+- **Status:** Accepted
+- **Decision:** Use official `@tailwindcss/vite` plugin for Tailwind CSS v4 integration.
+- **Reason:**
+  - Integrates directly with the Vite compiler.
+  - Eliminates the need for external `postcss.config.js` and `tailwind.config.js`.
+  - Enables configuring theme overrides declaratively inside `main.css` via the `@theme` directive.
+  - Highly optimized compiler-first build performance.
 
 ---
 
 # Locked Decisions
 
 Do not revisit during V0.1:
+
 - No Authentication
 - No Cloud Backend
 - No Database
@@ -94,10 +110,10 @@ Do not revisit during V0.1:
 
 # Current Status
 
-- **Current Phase:** To be updated
-- **Current Milestone:** To be updated
-- **Overall Progress:** To be updated
-- **Last Updated:** To be updated
+- **Current Phase:** Phase 1: Application Shell (Phase 0: Foundation complete)
+- **Current Milestone:** M0: Foundation Bootstrapped, Verified, and Audited
+- **Overall Progress:** Phase 0 (100% complete)
+- **Last Updated:** July 18, 2026
 
 ---
 
@@ -112,37 +128,35 @@ Do not revisit during V0.1:
 
 ---
 
-# Development Journal
-
-### Template
-| Date | Objective | Completed | Decisions | Problems | Solutions | Next Session |
-| --- | --- | --- | --- | --- | --- | --- |
-| | | | | | | |
+| Date       | Objective                                                                                                                      | Completed | Decisions                                                                                                                              | Problems                                                                                                                                   | Solutions                                                                                                                                                                                   | Next Session                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 2026-07-18 | Scaffold Electron + React + TS project, structure folders, and configure Tailwind v4, Zustand, Monaco, and preload IPC bridge. | Yes       | - Refactored default nested `src/renderer/src` to flat `src/renderer` matching `ARCHITECTURE.md`. <br> - Used Tailwind v4 Vite plugin. | - electron-vite template placed React code inside `src/renderer/src`. <br> - Tailwind v4 caused build failure with standard PostCSS setup. | - Updated tsconfig.web.json, aliases, and index.html to target direct `src/renderer/` root. <br> - Switched to native `@tailwindcss/vite` plugin and removed postcss/tailwind config files. | Begin Phase 1 (Application Shell, Sidebar navigation, page layout mockups). |
 
 ---
 
 # Lessons Learned
 
 ### Template
+
 | Date | Observation | Root Cause | Resolution | Recommendation |
-| --- | --- | --- | --- | --- |
-| | | | | |
+| ---- | ----------- | ---------- | ---------- | -------------- |
+|      |             |            |            |                |
 
 ---
 
 # Known Issues
 
 | Issue | Priority | Status | Workaround | Owner |
-| --- | --- | --- | --- | --- |
-| | | | | |
+| ----- | -------- | ------ | ---------- | ----- |
+|       |          |        |            |       |
 
 ---
 
 # Technical Debt
 
 | Debt | Reason | Risk | Planned Fix |
-| --- | --- | --- | --- |
-| | | | |
+| ---- | ------ | ---- | ----------- |
+|      |        |      |             |
 
 ---
 
@@ -150,6 +164,7 @@ Do not revisit during V0.1:
 
 Store ideas without committing to implementation.
 Examples:
+
 - AI Circuit Verification
 - Cloud Sync
 - Plugin Marketplace
@@ -168,25 +183,28 @@ Examples:
 
 ---
 
-# Dependency Log
-
-| Dependency | Purpose | Added In | Notes |
-| --- | --- | --- | --- |
-| | | | |
+| Dependency             | Purpose                              | Added In | Notes                          |
+| ---------------------- | ------------------------------------ | -------- | ------------------------------ |
+| `zustand`              | State management                     | Phase 0  | Global store structure created |
+| `react-router-dom`     | Layout navigation & Routing          | Phase 0  | Clean page structure           |
+| `@monaco-editor/react` | Embedded editor component            | Phase 0  | Verified rendering             |
+| `lucide-react`         | Semantic icons library               | Phase 0  | Icons in UI                    |
+| `@tailwindcss/vite`    | Tailwind CSS v4 compiler integration | Phase 0  | Replaced PostCSS               |
 
 ---
 
 # Breaking Changes
 
 | Version | Change | Reason | Migration |
-| --- | --- | --- | --- |
-| | | | |
+| ------- | ------ | ------ | --------- |
+|         |        |        |           |
 
 ---
 
 # Performance Notes
 
 Track:
+
 - Startup time
 - Upload speed
 - Memory usage
@@ -198,6 +216,7 @@ Track:
 # AI Collaboration Log
 
 After every AI implementation record:
+
 - Prompt summary
 - Files changed
 - Decisions
@@ -209,6 +228,7 @@ After every AI implementation record:
 # Contributor Checklist
 
 Before major changes read:
+
 - PRD.md
 - ARCHITECTURE.md
 - RULES.md
@@ -221,6 +241,7 @@ Before major changes read:
 # Success Criteria
 
 A new contributor should understand:
+
 1. Why previous decisions were made.
 2. Current project state.
 3. Outstanding work.
