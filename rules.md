@@ -1,0 +1,374 @@
+# rules.md
+
+**Document:** rules.md
+
+**Version:** 1.1
+
+**Status:** Mandatory
+
+**Applies To:** Every contributor (Human or AI)
+
+---
+
+# 1. Purpose
+
+This document defines the engineering principles, implementation rules,
+coding standards, and development philosophy of IoTOS AI.
+
+Every implementation must comply with these rules.
+
+If implementation conflicts with this document, these rules take
+precedence unless intentionally revised.
+
+---
+
+# 2. Mission
+
+IoTOS AI exists to simplify Arduino and ESP32 development through
+AI-assisted tooling.
+
+Prototype V0.1 is focused on delivering **one polished, reliable
+end-to-end workflow** for the investor demonstration.
+
+Success is measured by user experience, not feature count.
+
+---
+
+# 3. Engineering Values
+
+Engineering decisions must prioritize:
+
+1. Reliability
+2. Simplicity
+3. Beginner Experience
+4. Maintainability
+5. Extensibility
+6. Performance
+
+Never sacrifice reliability for additional features.
+
+---
+
+# 4. Scope Discipline
+
+Only implement features listed in the active development phase.
+
+Future roadmap items must never be implemented early.
+
+If a requested feature belongs to a later version:
+
+- Explain that it is out of scope.
+- Prepare extension points if appropriate.
+- Do not implement it.
+
+**Feature creep is considered a defect.**
+
+---
+
+# 5. Architecture Rules
+
+All implementation must comply with `architecture.md`.
+
+Mandatory rules:
+
+- Renderer never communicates directly with hardware.
+- Renderer never accesses Node.js APIs.
+- All privileged operations use IPC.
+- Services never import React.
+- Hardware modules never know about UI components.
+- AI never uploads firmware.
+- UploadService never generates firmware.
+- Each module owns one responsibility.
+
+Architectural boundaries must never be bypassed for convenience.
+
+---
+
+# 6. Service Design Rules
+
+Every service must:
+
+- Have one responsibility.
+- Be independently testable.
+- Expose a predictable public API.
+- Hide implementation details.
+- Minimize side effects.
+
+Services should depend only on what they genuinely require.
+
+---
+
+# 7. Code Quality Standards
+
+Code should optimize for:
+
+1. Correctness
+2. Readability
+3. Maintainability
+4. Performance
+5. Cleverness
+
+Prefer simple code over clever code.
+
+Duplicate logic should be refactored.
+
+---
+
+# 8. TypeScript Standards
+
+- Enable strict mode.
+- Avoid `any`.
+- Prefer interfaces for public contracts.
+- Use descriptive names.
+- Remove all TypeScript errors before merging.
+
+---
+
+# 9. Component Rules
+
+React components must:
+
+- Have one responsibility.
+- Remain reusable.
+- Stay reasonably small.
+- Receive data through props or state.
+- Avoid business logic.
+
+Business logic belongs in services.
+
+---
+
+# 10. State Management
+
+Global state contains only application-wide information.
+
+Local UI state remains local.
+
+Persist only information that must survive application restarts.
+
+---
+
+# 11. Error Handling
+
+Every recoverable error must provide:
+
+- A clear explanation.
+- An actionable next step.
+- A graceful recovery path.
+
+Never expose:
+
+- Stack traces
+- Internal exceptions
+- Arduino CLI output
+- Implementation details
+
+---
+
+# 12. Logging
+
+Development logs may contain technical information.
+
+User-facing messages must remain simple.
+
+Sensitive information must never be logged.
+
+Production logs should prioritize warnings and errors.
+
+---
+
+# 13. AI Rules
+
+AI is responsible only for:
+
+- Firmware generation
+- Code explanation
+- Wiring guidance
+- Component recommendations
+
+AI must never:
+
+- Upload firmware
+- Detect hardware
+- Manage serial communication
+- Execute operating system commands
+- Modify project architecture automatically
+
+Every AI response must be validated before use.
+
+---
+
+# 14. UI Philosophy
+
+The interface should feel:
+
+- Calm
+- Modern
+- Minimal
+- Predictable
+
+Every screen should have one primary purpose.
+
+Reduce cognitive load wherever possible.
+
+---
+
+# 15. User Experience Rules
+
+Always:
+
+- Automate repetitive work.
+- Provide sensible defaults.
+- Reduce clicks.
+- Reduce configuration.
+- Prefer guidance over documentation.
+
+Beginners are the primary audience.
+
+---
+
+# 16. Performance Rules
+
+The application must remain responsive during all operations.
+
+- Long-running tasks must be asynchronous.
+- UI should never freeze.
+- Expensive work belongs outside the Renderer.
+
+---
+
+# 17. Security Rules
+
+Secrets must never be hardcoded.
+
+Only the Main Process may:
+
+- Execute CLI commands
+- Access the filesystem
+- Access API keys
+- Communicate with hardware
+
+Renderer remains sandboxed.
+
+---
+
+# 18. Dependency Rules
+
+Before adding a dependency, verify:
+
+- It solves a real problem.
+- Existing tools cannot solve it.
+- It is actively maintained.
+- Documentation is adequate.
+- It does not unnecessarily increase complexity.
+
+Avoid dependency bloat.
+
+---
+
+# 19. File Organization
+
+Every file must have a single purpose.
+
+Avoid:
+
+- Utility dumping grounds
+- Oversized files
+- Duplicate logic
+- Circular dependencies
+
+Follow the folder structure defined in `architecture.md`.
+
+---
+
+# 20. Documentation Rules
+
+Architecture changes require documentation updates in the same commit.
+
+Documentation is treated as production code.
+
+Comments should explain *why*, not *what*.
+
+---
+
+# 21. Git Standards
+
+Every commit should:
+
+- Represent one logical change.
+- Build successfully.
+- Avoid unrelated modifications.
+
+Use clear, meaningful commit messages.
+
+---
+
+# 22. Testing Definition of Done
+
+Before any feature is complete:
+
+- Project builds successfully.
+- TypeScript passes.
+- Lint passes.
+- No console errors.
+- UI remains responsive.
+- Error handling is verified.
+- Existing functionality remains unaffected.
+
+---
+
+# 23. Out of Scope (Prototype V0.1)
+
+Do not implement:
+
+- Cloud Dashboard
+- OTA Updates
+- Authentication
+- Collaboration
+- Marketplace
+- Institution Portal
+- Plugin System
+- AI Circuit Debugging
+- Device Synchronization
+
+These belong to future versions.
+
+---
+
+# 24. Decision Framework
+
+Before implementing anything, ask:
+
+1. Does this improve the beginner experience?
+2. Does this improve reliability?
+3. Does this respect the architecture?
+4. Does this belong to the current phase?
+5. Is there a simpler solution?
+
+If any answer is “No”, reconsider the implementation.
+
+---
+
+# 25. Definition of Engineering Success
+
+Engineering success means:
+
+- Stable software
+- Predictable architecture
+- Clear code
+- Happy beginners
+- Minimal friction
+
+Features alone are not success.
+
+---
+
+# 26. Final Rule
+
+Every engineering decision must strengthen one promise:
+
+> **Describe → Generate → Upload → Run**
+> 
+
+If a feature, dependency, abstraction, or architectural decision does
+not strengthen that workflow, postpone it.
