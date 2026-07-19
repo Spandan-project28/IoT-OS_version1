@@ -91,6 +91,14 @@ Never duplicate information from the other documentation. Record changes and rea
   - Enables configuring theme overrides declaratively inside `main.css` via the `@theme` directive.
   - Highly optimized compiler-first build performance.
 
+### ADR-006
+
+- **Status:** Accepted
+- **Decision:** Use polling via `SerialPort.list()` for Phase 2 hardware discovery instead of attempting native streaming immediately.
+- **Reason:**
+  - Phase 2 uses `SerialPort.list()` exclusively for device enumeration. Native port opening and streaming will be introduced in Phase 4 once the required Windows build environment is available. This is a phased implementation decision rather than a change in architecture.
+  - A 2-second polling interval via the built-in listing mechanism is sufficient for the Phase 2 discovery requirements.
+
 ---
 
 # Locked Decisions
@@ -110,9 +118,9 @@ Do not revisit during V0.1:
 
 # Current Status
 
-- **Current Phase:** Phase 2: Hardware Detection (Phase 1: Application Shell complete)
+- **Current Phase:** Phase 2: Hardware Detection (Slices 1-3 complete)
 - **Current Milestone:** M1: Ready for Hardware Integration
-- **Overall Progress:** Phase 1 (100% complete)
+- **Overall Progress:** Phase 1 (100%), Phase 2 (In Progress)
 - **Last Updated:** July 19, 2026
 
 ---
@@ -128,10 +136,11 @@ Do not revisit during V0.1:
 
 ---
 
-| Date       | Objective                                                                                                                      | Completed | Decisions                                                                                                                                                                                                                                                                                                           | Problems                                                                                                                                   | Solutions                                                                                                                                                                                   | Next Session                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 2026-07-18 | Scaffold Electron + React + TS project, structure folders, and configure Tailwind v4, Zustand, Monaco, and preload IPC bridge. | Yes       | - Refactored default nested `src/renderer/src` to flat `src/renderer` matching `ARCHITECTURE.md`. <br> - Used Tailwind v4 Vite plugin.                                                                                                                                                                              | - electron-vite template placed React code inside `src/renderer/src`. <br> - Tailwind v4 caused build failure with standard PostCSS setup. | - Updated tsconfig.web.json, aliases, and index.html to target direct `src/renderer/` root. <br> - Switched to native `@tailwindcss/vite` plugin and removed postcss/tailwind config files. | Begin Phase 1 (Application Shell, Sidebar navigation, page layout mockups). |
-| 2026-07-19 | Implement Phase 1: Application Shell                                                                                           | Yes       | - Hybrid Theme (Light workspace, Dark Sidebar/TopBar) instead of Dark-first.<br>- Premium visual language inspired by Cursor/Arc.<br>- CSS variables in `main.css` for semantic styling.<br>- Topbar/Sidebar specific styling conventions.<br>- Shared UI components (`Button`, `Card`, `Badge`, `EmptyWorkspace`). | - UI initially felt like a generic Tailwind dashboard.<br>- Hardcoded hex values caused technical debt.                                    | - Redesigned to use a Hybrid Theme.<br>- Refactored hardcoded hex codes into semantic CSS tokens and Tailwind v4 variables.                                                                 | Begin Phase 2 (Hardware Detection & Serial Communication).                  |
+| Date       | Objective                                                                                                                      | Completed | Decisions                                                                                                                                                                                                                                                                                                           | Problems                                                                                                                                                                 | Solutions                                                                                                                                                                                                                   | Next Session                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 2026-07-18 | Scaffold Electron + React + TS project, structure folders, and configure Tailwind v4, Zustand, Monaco, and preload IPC bridge. | Yes       | - Refactored default nested `src/renderer/src` to flat `src/renderer` matching `ARCHITECTURE.md`. <br> - Used Tailwind v4 Vite plugin.                                                                                                                                                                              | - electron-vite template placed React code inside `src/renderer/src`. <br> - Tailwind v4 caused build failure with standard PostCSS setup.                               | - Updated tsconfig.web.json, aliases, and index.html to target direct `src/renderer/` root. <br> - Switched to native `@tailwindcss/vite` plugin and removed postcss/tailwind config files.                                 | Begin Phase 1 (Application Shell, Sidebar navigation, page layout mockups). |
+| 2026-07-19 | Implement Phase 1: Application Shell                                                                                           | Yes       | - Hybrid Theme (Light workspace, Dark Sidebar/TopBar) instead of Dark-first.<br>- Premium visual language inspired by Cursor/Arc.<br>- CSS variables in `main.css` for semantic styling.<br>- Topbar/Sidebar specific styling conventions.<br>- Shared UI components (`Button`, `Card`, `Badge`, `EmptyWorkspace`). | - UI initially felt like a generic Tailwind dashboard.<br>- Hardcoded hex values caused technical debt.                                                                  | - Redesigned to use a Hybrid Theme.<br>- Refactored hardcoded hex codes into semantic CSS tokens and Tailwind v4 variables.                                                                                                 | Begin Phase 2 (Hardware Detection & Serial Communication).                  |
+| 2026-07-19 | Phase 2, Slices 1-3: Hardware Abstraction & Services                                                                           | Yes       | - Rejected monolithic service pattern for a decoupled `HardwareManager` + pure domain services.<br>- Created static, immutable `HardwareRegistry`.<br>- Resolved CH340 ambiguity by returning multiple candidates instead of guessing.<br>- Adopted discriminated union `IIdentificationResult`.                    | - `serialport` native bindings failed to rebuild locally on Windows due to missing VS Build Tools.<br>- Multiple clone boards share the exact same VID/PID (e.g. CH340). | - Deferred native port opening to Phase 4; used `SerialPort.list()` for Phase 2 enumeration.<br>- Designed `HardwareRegistry.findBoardsByVidPid` to surface ambiguity, letting `BoardIdentificationService` use heuristics. | Phase 2, Slice 4 (HardwareManager & EventBus).                              |
 
 ---
 
@@ -184,13 +193,14 @@ Examples:
 
 ---
 
-| Dependency             | Purpose                              | Added In | Notes                          |
-| ---------------------- | ------------------------------------ | -------- | ------------------------------ |
-| `zustand`              | State management                     | Phase 0  | Global store structure created |
-| `react-router-dom`     | Layout navigation & Routing          | Phase 0  | Clean page structure           |
-| `@monaco-editor/react` | Embedded editor component            | Phase 0  | Verified rendering             |
-| `lucide-react`         | Semantic icons library               | Phase 0  | Icons in UI                    |
-| `@tailwindcss/vite`    | Tailwind CSS v4 compiler integration | Phase 0  | Replaced PostCSS               |
+| Dependency             | Purpose                              | Added In | Notes                                                                   |
+| ---------------------- | ------------------------------------ | -------- | ----------------------------------------------------------------------- |
+| `zustand`              | State management                     | Phase 0  | Global store structure created                                          |
+| `react-router-dom`     | Layout navigation & Routing          | Phase 0  | Clean page structure                                                    |
+| `@monaco-editor/react` | Embedded editor component            | Phase 0  | Verified rendering                                                      |
+| `lucide-react`         | Semantic icons library               | Phase 0  | Icons in UI                                                             |
+| `@tailwindcss/vite`    | Tailwind CSS v4 compiler integration | Phase 0  | Replaced PostCSS                                                        |
+| `serialport`           | Cross-platform serial port access    | Phase 2  | Used for listing ports in Phase 2; native streaming deferred to Phase 4 |
 
 ---
 
