@@ -11,11 +11,11 @@ export function Card({
   ...props
 }: CardProps): React.JSX.Element {
   const bg = elevated
-    ? 'bg-surface-elevated shadow-lg border border-border-strong/50 backdrop-blur-sm'
-    : 'bg-surface border border-border shadow-sm'
+    ? 'bg-surface shadow-md border border-border'
+    : 'bg-surface shadow-sm border border-border'
 
   return (
-    <div className={`rounded-2xl transition-all duration-200 ${bg} ${className}`} {...props}>
+    <div className={`rounded-[20px] transition-all duration-200 ${bg} ${className}`} {...props}>
       {children}
     </div>
   )

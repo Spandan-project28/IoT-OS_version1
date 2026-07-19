@@ -11,72 +11,66 @@ export function Sidebar(): React.JSX.Element {
 
   return (
     <div
-      className={`flex flex-col h-full bg-surface-elevated/40 border-r border-border transition-all duration-300 ease-in-out select-none ${
-        sidebarCollapsed ? 'w-[68px]' : 'w-[240px]'
+      className={`flex flex-col h-full bg-dark-bg border-r border-dark-border transition-all duration-300 ease-in-out select-none ${
+        sidebarCollapsed ? 'w-[76px]' : 'w-[180px]'
       }`}
     >
-      <div className="flex items-center justify-between p-16 h-14 shrink-0">
+      <div className="flex items-center justify-between p-24 h-20 shrink-0">
         {!sidebarCollapsed && (
-          <div className="flex items-center gap-10 pl-4 overflow-hidden">
-            <div className="w-5 h-5 rounded-[4px] bg-gradient-to-br from-text-primary to-text-secondary shrink-0 shadow-sm" />
-            <span className="font-semibold text-text-primary tracking-tight whitespace-nowrap text-[14px]">
-              IoTOS AI
+          <div className="flex items-center gap-12 pl-4 overflow-hidden">
+            <div className="w-6 h-6 rounded-md bg-primary shrink-0 shadow-glow-primary flex items-center justify-center">
+              <div className="w-2 h-2 bg-dark-bg rounded-sm" />
+            </div>
+            <span className="font-bold text-white tracking-tight whitespace-nowrap text-[16px]">
+              IoT-OS
             </span>
           </div>
         )}
         <IconButton
           icon={
             sidebarCollapsed ? (
-              <PanelLeftOpen className="w-[14px] h-[14px] text-text-secondary" />
+              <PanelLeftOpen className="w-[16px] h-[16px] text-[#A0A0A0]" />
             ) : (
-              <PanelLeftClose className="w-[14px] h-[14px] text-text-secondary hover:text-text-primary transition-colors" />
+              <PanelLeftClose className="w-[16px] h-[16px] text-[#A0A0A0] hover:text-white transition-colors" />
             )
           }
           onClick={toggleSidebar}
-          className={sidebarCollapsed ? 'mx-auto' : ''}
+          className={sidebarCollapsed ? 'mx-auto' : 'bg-transparent hover:bg-dark-surface'}
           aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         />
       </div>
 
-      <div className="px-12 mt-4 mb-2">
+      <div className="px-16 mt-8 mb-4">
         {!sidebarCollapsed && (
-          <div className="px-8 text-[11px] font-semibold tracking-wider text-text-secondary/70 mb-4 uppercase">
+          <div className="px-12 text-[11px] font-bold tracking-[0.1em] text-[#A0A0A0] mb-6 uppercase">
             Workspace
           </div>
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto flex flex-col gap-[2px] px-12">
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col gap-4 px-16">
         {navigationConfig.map((item) => (
           <Tooltip key={item.id} content={sidebarCollapsed ? item.label : ''} position="right">
             <NavLink
               to={item.path}
               className={({ isActive }) =>
-                `group flex items-center gap-10 px-8 py-[6px] rounded-md transition-all duration-150 relative ${
+                `group flex items-center gap-12 px-12 py-10 rounded-xl transition-all duration-300 relative ${
                   isActive
-                    ? 'text-text-primary'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-white/[0.04]'
+                    ? 'text-primary drop-shadow-[var(--shadow-glow-primary)]'
+                    : 'text-text-disabled hover:text-white hover:drop-shadow-[var(--shadow-glow)]'
                 } ${sidebarCollapsed ? 'justify-center' : ''}`
               }
             >
               {({ isActive }) => (
                 <>
-                  {isActive && (
-                    <div className="absolute inset-0 bg-white/[0.08] rounded-md shadow-sm border border-white/[0.05] -z-10" />
-                  )}
-                  {isActive && !sidebarCollapsed && (
-                    <div className="absolute left-[-12px] top-1/2 -translate-y-1/2 h-4 w-[3px] bg-text-primary rounded-r-full" />
-                  )}
                   <item.icon
-                    className={`w-[15px] h-[15px] shrink-0 transition-colors ${
-                      isActive
-                        ? 'text-text-primary'
-                        : 'text-text-secondary group-hover:text-text-primary'
+                    className={`w-[18px] h-[18px] shrink-0 transition-colors duration-300 ${
+                      isActive ? 'text-primary' : 'text-text-disabled group-hover:text-white'
                     }`}
                     strokeWidth={isActive ? 2.5 : 2}
                   />
                   {!sidebarCollapsed && (
-                    <span className="text-[13px] font-medium tracking-wide">{item.label}</span>
+                    <span className="text-[14px] font-medium tracking-wide">{item.label}</span>
                   )}
                 </>
               )}
@@ -85,13 +79,12 @@ export function Sidebar(): React.JSX.Element {
         ))}
       </nav>
 
-      {/* Footer area for version or user info later */}
-      <div className="p-16 border-t border-border/50 shrink-0 flex items-center justify-center">
+      <div className="p-24 border-t border-dark-border shrink-0 flex items-center justify-center">
         {sidebarCollapsed ? (
-          <div className="w-6 h-6 rounded-full bg-surface border border-border" />
+          <div className="w-8 h-8 rounded-full bg-dark-surface border border-dark-border-strong" />
         ) : (
-          <div className="flex items-center gap-8 text-[12px] text-text-secondary font-mono w-full px-8">
-            <span className="w-2 h-2 rounded-full bg-border-strong" />
+          <div className="flex items-center gap-10 text-[13px] text-text-disabled font-mono w-full px-8">
+            <span className="w-[10px] h-[10px] rounded-full bg-dark-border-strong border border-dark-bg ring-2 ring-dark-surface" />
             Disconnected
           </div>
         )}

@@ -102,7 +102,7 @@ Inspired by:
 Characteristics:
 
 - Desktop-first
-- Dark-first
+- Hybrid Theme (Light workspace, Dark Sidebar/TopBar)
 - Spacious
 - Soft elevation
 - Rounded corners
@@ -121,9 +121,11 @@ Core tokens:
 - Surface
 - Elevated Surface
 - Border
-- Primary
-- Secondary
-- Accent
+- Dark Background
+- Dark Surface
+- Dark Border
+- Primary Accent
+- Dark Accent
 - Success
 - Warning
 - Error
@@ -133,6 +135,22 @@ Core tokens:
 - Disabled
 
 Never communicate state using color alone.
+
+---
+
+# 7.1 Hybrid Theme Philosophy
+
+The application defaults to a hybrid aesthetic for high-contrast usability:
+
+- **Workspace:** Light (#F8F8F8)
+- **Sidebar:** Dark (#0F0F0F)
+- **Top Bar:** Dark (#0F0F0F)
+- **Floating UI/Badges (Dark Areas):** Dark Surface (#202020)
+- **Panels & Cards (Light Areas):** Light Surface (#FFFFFF)
+- **Primary Accent:** Green (#5DD62C) - Used sparingly for active states and glows.
+- **Dark Accent:** Deep Green (#337418)
+
+Green is an accent color. It must not be used as a dominant background.
 
 ---
 

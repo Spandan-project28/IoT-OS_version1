@@ -110,10 +110,10 @@ Do not revisit during V0.1:
 
 # Current Status
 
-- **Current Phase:** Phase 1: Application Shell (Phase 0: Foundation complete)
-- **Current Milestone:** M0: Foundation Bootstrapped, Verified, and Audited
-- **Overall Progress:** Phase 0 (100% complete)
-- **Last Updated:** July 18, 2026
+- **Current Phase:** Phase 2: Hardware Detection (Phase 1: Application Shell complete)
+- **Current Milestone:** M1: Ready for Hardware Integration
+- **Overall Progress:** Phase 1 (100% complete)
+- **Last Updated:** July 19, 2026
 
 ---
 
@@ -128,9 +128,10 @@ Do not revisit during V0.1:
 
 ---
 
-| Date       | Objective                                                                                                                      | Completed | Decisions                                                                                                                              | Problems                                                                                                                                   | Solutions                                                                                                                                                                                   | Next Session                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 2026-07-18 | Scaffold Electron + React + TS project, structure folders, and configure Tailwind v4, Zustand, Monaco, and preload IPC bridge. | Yes       | - Refactored default nested `src/renderer/src` to flat `src/renderer` matching `ARCHITECTURE.md`. <br> - Used Tailwind v4 Vite plugin. | - electron-vite template placed React code inside `src/renderer/src`. <br> - Tailwind v4 caused build failure with standard PostCSS setup. | - Updated tsconfig.web.json, aliases, and index.html to target direct `src/renderer/` root. <br> - Switched to native `@tailwindcss/vite` plugin and removed postcss/tailwind config files. | Begin Phase 1 (Application Shell, Sidebar navigation, page layout mockups). |
+| Date       | Objective                                                                                                                      | Completed | Decisions                                                                                                                                                                                                                                                                                                           | Problems                                                                                                                                   | Solutions                                                                                                                                                                                   | Next Session                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 2026-07-18 | Scaffold Electron + React + TS project, structure folders, and configure Tailwind v4, Zustand, Monaco, and preload IPC bridge. | Yes       | - Refactored default nested `src/renderer/src` to flat `src/renderer` matching `ARCHITECTURE.md`. <br> - Used Tailwind v4 Vite plugin.                                                                                                                                                                              | - electron-vite template placed React code inside `src/renderer/src`. <br> - Tailwind v4 caused build failure with standard PostCSS setup. | - Updated tsconfig.web.json, aliases, and index.html to target direct `src/renderer/` root. <br> - Switched to native `@tailwindcss/vite` plugin and removed postcss/tailwind config files. | Begin Phase 1 (Application Shell, Sidebar navigation, page layout mockups). |
+| 2026-07-19 | Implement Phase 1: Application Shell                                                                                           | Yes       | - Hybrid Theme (Light workspace, Dark Sidebar/TopBar) instead of Dark-first.<br>- Premium visual language inspired by Cursor/Arc.<br>- CSS variables in `main.css` for semantic styling.<br>- Topbar/Sidebar specific styling conventions.<br>- Shared UI components (`Button`, `Card`, `Badge`, `EmptyWorkspace`). | - UI initially felt like a generic Tailwind dashboard.<br>- Hardcoded hex values caused technical debt.                                    | - Redesigned to use a Hybrid Theme.<br>- Refactored hardcoded hex codes into semantic CSS tokens and Tailwind v4 variables.                                                                 | Begin Phase 2 (Hardware Detection & Serial Communication).                  |
 
 ---
 
@@ -198,6 +199,29 @@ Examples:
 | Version | Change | Reason | Migration |
 | ------- | ------ | ------ | --------- |
 |         |        |        |           |
+
+---
+
+# Phase 1 Conventions & Artifacts
+
+- **Routing Architecture:** React Router DOM configured via `AppRouter.tsx` mapping to `AppLayout.tsx`.
+- **Zustand Conventions:** `useAppStore.ts` stores pure UI state (`sidebarCollapsed`, `currentTheme`) alongside future placeholders (`boardStatus`, `uploadStatus`).
+- **CSS Variables:** All visual values are driven by `--color-*`, `--shadow-*`, and `--radius-*` definitions in `main.css`.
+- **Hybrid Theme:** Workspace uses Light Theme, while navigation (Top Bar, Sidebar) uses Dark Theme.
+- **Top Bar:** Contains breadcrumbs, command search (Ctrl K), and global action buttons (Generate, Upload, Run).
+- **Sidebar:** Contains navigation links, toggle state (Collapse/Expand), and active indicators using the primary accent color (`#5DD62C`).
+- **Empty States:** The `EmptyWorkspace` component provides a consistent visual fallback for unoccupied screens.
+- **Component Naming:** PascalCase for React components, semantic descriptive names (e.g., `IconButton`, `SkeletonLoader`).
+
+---
+
+# Phase 2 Prerequisites
+
+Phase 1 technical debt (hardcoded colors) has been cleared. The UI is completely isolated from business logic. The application is ready to accept Node.js integration for Phase 2:
+
+- Connect Arduino CLI
+- Implement device detection
+- Display real-time serial output
 
 ---
 
