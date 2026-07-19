@@ -57,7 +57,7 @@ export function Sidebar(): React.JSX.Element {
                 `group flex items-center gap-12 px-12 py-10 rounded-xl transition-all duration-300 relative ${
                   isActive
                     ? 'text-primary drop-shadow-[var(--shadow-glow-primary)]'
-                    : 'text-text-disabled hover:text-white hover:drop-shadow-[var(--shadow-glow)]'
+                    : 'text-disabled hover:text-white hover:drop-shadow-[var(--shadow-glow)]'
                 } ${sidebarCollapsed ? 'justify-center' : ''}`
               }
             >
@@ -65,7 +65,7 @@ export function Sidebar(): React.JSX.Element {
                 <>
                   <item.icon
                     className={`w-[18px] h-[18px] shrink-0 transition-colors duration-300 ${
-                      isActive ? 'text-primary' : 'text-text-disabled group-hover:text-white'
+                      isActive ? 'text-primary' : 'text-disabled group-hover:text-white'
                     }`}
                     strokeWidth={isActive ? 2.5 : 2}
                   />
@@ -83,7 +83,7 @@ export function Sidebar(): React.JSX.Element {
         {sidebarCollapsed ? (
           <div className="w-8 h-8 rounded-full bg-dark-surface border border-dark-border-strong" />
         ) : (
-          <div className="flex items-center gap-10 text-[13px] text-text-disabled font-mono w-full px-8">
+          <div className="flex items-center gap-10 text-[13px] text-disabled font-mono w-full px-8">
             <span className="w-[10px] h-[10px] rounded-full bg-dark-border-strong border border-dark-bg ring-2 ring-dark-surface" />
             Disconnected
           </div>

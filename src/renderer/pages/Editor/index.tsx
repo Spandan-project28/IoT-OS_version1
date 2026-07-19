@@ -12,7 +12,7 @@ export function Editor(): React.JSX.Element {
           <span className="font-semibold text-white text-[14px] tracking-tight">
             (No Project Open)
           </span>
-          <span className="px-8 py-2 rounded-md bg-dark-surface border border-dark-border-strong text-[11px] text-text-disabled uppercase tracking-wider font-mono font-bold">
+          <span className="px-8 py-2 rounded-md bg-dark-surface border border-dark-border-strong text-[11px] text-disabled uppercase tracking-wider font-mono font-bold">
             Unsaved
           </span>
         </div>

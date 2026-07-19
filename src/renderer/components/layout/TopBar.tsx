@@ -26,7 +26,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
     <header className="h-20 border-b border-dark-border bg-dark-bg flex items-center px-24 shrink-0 justify-between select-none">
       {/* Left Section - Page Title & Breadcrumb */}
       <div className="flex items-center gap-12 flex-1 min-w-0">
-        <div className="flex items-center text-text-disabled text-[14px] font-medium tracking-wide">
+        <div className="flex items-center text-disabled text-[14px] font-medium tracking-wide">
           <span className="hover:text-white cursor-pointer transition-colors">IoTOS AI</span>
           <ChevronRight className="w-4 h-4 mx-4 opacity-50" />
           <span className="text-white">{currentPage?.label || 'Dashboard'}</span>
@@ -42,7 +42,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
       {/* Center Section - Large Command Search Bar */}
       <div className="flex-1 flex justify-center px-32 max-w-[600px] hidden md:flex">
         <div className="relative w-full group">
-          <Search className="w-[16px] h-[16px] absolute left-16 top-1/2 -translate-y-1/2 text-text-disabled group-hover:text-white transition-colors" />
+          <Search className="w-[16px] h-[16px] absolute left-16 top-1/2 -translate-y-1/2 text-disabled group-hover:text-white transition-colors" />
           <input
             type="text"
             placeholder="Search commands and files..."
@@ -59,7 +59,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
       <div className="flex items-center gap-16 flex-1 justify-end">
         <Badge
           variant="default"
-          className="h-[32px] px-12 gap-8 bg-dark-surface border-dark-border-strong text-text-disabled font-mono text-[12px] uppercase tracking-wider rounded-lg flex items-center justify-center"
+          className="h-[32px] px-12 gap-8 bg-dark-surface border-dark-border-strong text-disabled font-mono text-[12px] uppercase tracking-wider rounded-lg flex items-center justify-center"
         >
           <Cpu className="w-[14px] h-[14px]" />
           No Device
@@ -71,7 +71,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
           <Button
             variant="ghost"
             size="sm"
-            className="h-[32px] text-text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+            className="h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
             leftIcon={<Sparkles className="w-4 h-4" />}
             disabled
           >
@@ -80,7 +80,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
           <Button
             variant="ghost"
             size="sm"
-            className="h-[32px] text-text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+            className="h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
             leftIcon={<Upload className="w-4 h-4" />}
             disabled
           >
@@ -89,7 +89,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
           <Button
             variant="ghost"
             size="sm"
-            className="h-[32px] text-text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+            className="h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
             leftIcon={<Play className="w-4 h-4" />}
             disabled
           >
@@ -101,7 +101,7 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
 
         <NavLink
           to="/settings"
-          className="text-text-disabled hover:text-white hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+          className="text-disabled hover:text-white hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
         >
           <IconButton
             icon={<SettingsIcon className="w-5 h-5" />}
