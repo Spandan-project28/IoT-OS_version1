@@ -21,6 +21,11 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 - Implemented `SerialPortService` using a polling pattern on `SerialPort.list()` for cross-platform OS discovery without requiring native USB driver bindings.
 - Implemented `BoardIdentificationService` with manufacturer string heuristics to resolve ambiguous VID/PID collisions and a discriminated union (`IIdentificationResult`) to explicitly model `identified`, `unknown`, and `ambiguous` states.
 
+### Slice 4
+- Created strongly typed `HardwareEventBus` utilizing Node.js `EventEmitter` for internal communication without Electron or IPC dependencies.
+- Implemented `HardwareManager` as a pure orchestrator managing hardware services lifecycle and assembling state snapshots.
+- Applied vertical slicing principles by explicitly removing premature board selection functionality, deferring it to later IPC and UI slices.
+
 ## Phase 1: Application Shell
 
 - Initialized Electron + React + TypeScript monorepo using `@quick-start/electron`.
