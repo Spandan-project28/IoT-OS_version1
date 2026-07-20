@@ -19,10 +19,8 @@
  * - upload(firmware)          → IUploadResult     (consumes compiled artifact)
  * - compileAndUpload(request) → IUploadResult     (thin convenience wrapper)
  *
- * Future consumers:
- * - IPC handlers (Slice 9) will invoke compileAndUpload() in response to
- *   hardware:upload channel calls from the Renderer.
- * - HardwareManager may coordinate upload readiness checks before delegating.
+ * IPC integration: uploadIpcHandlers.ts (Phase 3, Slice 9) delegates all three
+ * public methods to the Renderer via the upload:* invoke channels.
  */
 
 import { spawn } from 'child_process'
@@ -222,9 +220,11 @@ const SKETCH_FILE_NAME = 'firmware.ino'
  *     firmware/
  *       firmware.ino    ← arduino-cli requires dirname === filename (sans ext)
  *
- * Returns the root temp dir path (buildPath) and the sketch dir path separately.
+ * Returns only the root build directory path. The sketch subdirectory is
+ * always derivable as buildPath + SKETCH_FOLDER_NAME and is re-derived by
+ * compile() at the point of use.
  */
-async function createTempBuild(source: string): Promise<{ buildPath: string; sketchDir: string }> {
+async function createTempBuild(source: string): Promise<string> {
   const buildPath = path.join(os.tmpdir(), `iotosai-${randomUUID()}`)
   const sketchDir = path.join(buildPath, SKETCH_FOLDER_NAME)
   const sourceFile = path.join(sketchDir, SKETCH_FILE_NAME)
@@ -232,7 +232,7 @@ async function createTempBuild(source: string): Promise<{ buildPath: string; ske
   await fs.mkdir(sketchDir, { recursive: true })
   await fs.writeFile(sourceFile, source, 'utf-8')
 
-  return { buildPath, sketchDir }
+  return buildPath
 }
 
 /**
@@ -271,7 +271,8 @@ async function compile(request: IUploadRequest): Promise<ICompileResult> {
   }
 
   // Step 2: Create temp build directory and write source
-  const { buildPath, sketchDir } = await createTempBuild(request.source)
+  const buildPath = await createTempBuild(request.source)
+  const sketchDir = path.join(buildPath, SKETCH_FOLDER_NAME)
 
   // Step 3: Execute arduino-cli compile
   const result = await runProcess('arduino-cli', ['compile', '--fqbn', request.fqbn, sketchDir])

@@ -1,37 +1,36 @@
 /**
  * IPC Contracts
  *
- * This file is the single source of truth for every IPC channel that crosses
- * the Main ↔ Renderer boundary for the hardware subsystem.
+ * The single source of truth for every IPC channel that crosses the
+ * Main ↔ Renderer boundary.
  *
  * Architectural rules:
  * - Channel names are string literals, not enums, so they can be used directly
  *   with ipcMain.handle() and ipcRenderer.invoke() without an extra lookup.
- * - Payload types mirror the domain types from @shared/types/hardware exactly.
+ * - Payload types mirror the domain types from @shared/types exactly.
  *   No data transformation is performed at the IPC layer.
- * - Invoke channels (Renderer → Main, awaitable response):
- *     hardware:getState  — returns the current IHardwareState snapshot.
- *     hardware:refresh   — forces a CLI refresh + re-identification cycle and
- *                          returns the updated IHardwareState snapshot.
- * - Push channels (Main → Renderer, one-way):
- *     hardware:stateChanged — pushed by the Main process whenever
- *                             HardwareManager emits hardwareStateChanged.
  *
- * Scope:
- * - Phase 2, Slice 5 introduces only the hardware channels.
- * - Future phases will add upload:*, serial:*, ai:*, project:*, settings:*
- *   channels in their respective slices.
+ * Hardware channels (Phase 2, Slice 5):
+ *   hardware:getState   — Renderer → Main invoke, returns IHardwareState snapshot.
+ *   hardware:refresh    — Renderer → Main invoke, forces re-scan, returns IHardwareState.
+ *   hardware:stateChanged — Main → Renderer push, sent on every HardwareManager state change.
+ *
+ * Upload channels (Phase 3, Slice 9):
+ *   upload:compile          — Renderer → Main invoke, returns ICompileResult.
+ *   upload:upload           — Renderer → Main invoke, returns IUploadResult.
+ *   upload:compileAndUpload — Renderer → Main invoke, returns IUploadResult.
  *
  * Usage (Main):
  *   ipcMain.handle(HardwareIpcChannels.getState, () => HardwareManager.getState())
+ *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
  *
  * Usage (Preload):
  *   ipcRenderer.invoke(HardwareIpcChannels.getState)
- *   ipcRenderer.on(HardwareIpcChannels.stateChanged, callback)
+ *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
  *
  * Usage (Renderer):
  *   window.api.hardware.getState()
- *   window.api.hardware.onStateChanged(callback)
+ *   window.api.upload.compileAndUpload(request)
  */
 
 import type { IHardwareState } from './hardware'
@@ -146,41 +145,40 @@ export const UploadIpcChannels = Object.freeze({
 } as const)
 
 // ---------------------------------------------------------------------------
-// Upload payload types
+// Upload payload type aliases
+//
+// These are documentation-only type aliases that name each channel's request
+// and response types explicitly. They are not imported by the IPC handlers
+// or preload (which import directly from @shared/types/upload) but serve as
+// a clear contract reference for this file's readers.
 // ---------------------------------------------------------------------------
 
 /**
  * Request payload for the upload:compile invoke channel.
- * Passed from Renderer → Preload → ipcRenderer.invoke() → ipcMain.handle().
  */
 export type UploadCompileRequest = IUploadRequest
 
 /**
  * Response payload for the upload:compile invoke channel.
- * Returned by UploadService.compile() without transformation.
  */
 export type UploadCompileResult = ICompileResult
 
 /**
  * Request payload for the upload:upload invoke channel.
- * The ICompiledFirmware artifact produced by a prior upload:compile call.
  */
 export type UploadUploadRequest = ICompiledFirmware
 
 /**
  * Response payload for the upload:upload invoke channel.
- * Returned by UploadService.upload() without transformation.
  */
 export type UploadUploadResult = IUploadResult
 
 /**
  * Request payload for the upload:compileAndUpload invoke channel.
- * Same as UploadCompileRequest — the full IUploadRequest.
  */
 export type UploadCompileAndUploadRequest = IUploadRequest
 
 /**
  * Response payload for the upload:compileAndUpload invoke channel.
- * Returned by UploadService.compileAndUpload() without transformation.
  */
 export type UploadCompileAndUploadResult = IUploadResult

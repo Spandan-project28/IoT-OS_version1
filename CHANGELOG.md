@@ -11,6 +11,22 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 - Added typed `lastCompileResult` and `lastUploadResult` to store response artifacts.
 - Implemented `uploadLoading` and `uploadError` fields using try/finally for consistent error handling and state lifecycle.
 
+### Slice 11
+
+- Wired existing TopBar Upload button to `compileAndUploadFirmware` via Zustand — no new component required.
+- Added `firmwareSource` prop to `TopBar` so only the Editor page activates the upload flow; all other pages remain in placeholder state.
+- Upload button guards: disabled when no board, no FQBN, no CLI, or upload already in progress; primary variant when actionable.
+- Added a lightweight status strip below the TopBar using existing design tokens — shows success or human-readable error after upload completes; auto-clears on next upload.
+- Seeded `Editor` page with a `DEMO_FIRMWARE_SOURCE` Blink sketch for V0.1 testability pending Monaco integration.
+
+### Slice 12
+
+- Stabilization: removed stale future-tense forecast comments from `UploadService.ts` header.
+- Simplified `createTempBuild` to return only `buildPath`; `sketchDir` is re-derived at point of use in `compile()`.
+- Updated `ipc.ts` header to accurately reflect that both hardware and upload channels are live.
+- Clarified upload payload type aliases in `ipc.ts` as documentation-only contracts.
+- Renamed `uploadFailed` → `hasUploadError` in `TopBar.tsx` to accurately describe the IPC-transport-failure case.
+
 ## Phase 2: Hardware Detection
 
 ### Slice 1
