@@ -5,13 +5,16 @@ import {
   Upload,
   Sparkles,
   Settings as SettingsIcon,
-  ChevronRight
+  ChevronRight,
+  Loader2
 } from 'lucide-react'
 import { Badge } from '../common/Badge'
 import { Button } from '../common/Button'
 import { IconButton } from '../common/IconButton'
 import { NavLink, useLocation } from 'react-router-dom'
 import { navigationConfig } from '../../domain/navigation/config'
+import { useAppStore } from '../../store/useAppStore'
+import { SkeletonLoader } from '../common/SkeletonLoader'
 import React from 'react'
 
 export interface TopBarProps {
@@ -21,6 +24,9 @@ export interface TopBarProps {
 export function TopBar({ children }: TopBarProps): React.JSX.Element {
   const location = useLocation()
   const currentPage = navigationConfig.find((item) => item.path === location.pathname)
+  const { hardware, hardwareLoading } = useAppStore()
+
+  const connectedBoard = hardware.connectedBoards[0] ?? null
 
   return (
     <header className="h-20 border-b border-dark-border bg-dark-bg flex items-center px-24 shrink-0 justify-between select-none">
@@ -57,13 +63,26 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
 
       {/* Right Section - Global Actions & Status */}
       <div className="flex items-center gap-16 flex-1 justify-end">
-        <Badge
-          variant="default"
-          className="h-[32px] px-12 gap-8 bg-dark-surface border-dark-border-strong text-disabled font-mono text-[12px] uppercase tracking-wider rounded-lg flex items-center justify-center"
-        >
-          <Cpu className="w-[14px] h-[14px]" />
-          No Device
-        </Badge>
+        {/* Device badge — driven by live Zustand hardware state */}
+        {hardwareLoading && !connectedBoard ? (
+          <SkeletonLoader className="h-[32px] w-[120px] rounded-lg" />
+        ) : connectedBoard ? (
+          <Badge
+            variant="success"
+            className="h-[32px] px-12 gap-8 font-mono text-[12px] uppercase tracking-wider rounded-lg flex items-center justify-center"
+          >
+            <Cpu className="w-[14px] h-[14px]" />
+            {connectedBoard.name}
+          </Badge>
+        ) : (
+          <Badge
+            variant="default"
+            className="h-[32px] px-12 gap-8 bg-dark-surface border-dark-border-strong text-disabled font-mono text-[12px] uppercase tracking-wider rounded-lg flex items-center justify-center"
+          >
+            <Cpu className="w-[14px] h-[14px]" />
+            No Device
+          </Badge>
+        )}
 
         <div className="h-6 w-[1px] bg-dark-border" />
 
@@ -98,6 +117,17 @@ export function TopBar({ children }: TopBarProps): React.JSX.Element {
         </div>
 
         <div className="h-6 w-[1px] bg-dark-border" />
+
+        {/* CLI status indicator */}
+        {hardware.cli.isInstalled && (
+          <div className="flex items-center gap-6 text-[11px] text-disabled font-mono">
+            <span className="w-[6px] h-[6px] rounded-full bg-primary shadow-glow-primary" />
+            CLI {hardware.cli.version}
+          </div>
+        )}
+        {hardware.isScanning && (
+          <Loader2 className="w-[14px] h-[14px] text-disabled animate-spin" />
+        )}
 
         <NavLink
           to="/settings"
