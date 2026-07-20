@@ -1,5 +1,11 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type { IHardwareState } from '@shared/types/hardware'
+import type {
+  IUploadRequest,
+  ICompiledFirmware,
+  ICompileResult,
+  IUploadResult
+} from '@shared/types/upload'
 
 /**
  * IApi
@@ -10,7 +16,7 @@ import type { IHardwareState } from '@shared/types/hardware'
  * - This declaration file is the Renderer's view of the preload API.
  * - It mirrors the runtime object in preload/index.ts exactly.
  * - Types are imported from @shared/types — never duplicated.
- * - Future subsystems (upload, serial, ai, project, settings) are added here
+ * - Future subsystems (serial, ai, project, settings) are added here
  *   alongside their preload implementation, in their respective slices.
  *
  * All types are imported using relative paths because this .d.ts is loaded
@@ -41,8 +47,32 @@ export interface IHardwareApi {
   onStateChanged: (callback: (state: IHardwareState) => void) => () => void
 }
 
+export interface IUploadApi {
+  /**
+   * Compiles firmware source using arduino-cli.
+   * Returns a compiled firmware artifact on success.
+   * The artifact must be passed to upload() to complete the pipeline
+   * and trigger cleanup of the temporary build directory.
+   */
+  compile: (request: IUploadRequest) => Promise<ICompileResult>
+
+  /**
+   * Uploads a previously compiled firmware artifact to the target port.
+   * The artifact is spent after this call — do not reuse it.
+   */
+  upload: (firmware: ICompiledFirmware) => Promise<IUploadResult>
+
+  /**
+   * Compiles firmware source then uploads to the board in a single call.
+   * Stops and returns the compile error if compilation fails.
+   * Primary entry point for the one-click upload workflow in V0.1.
+   */
+  compileAndUpload: (request: IUploadRequest) => Promise<IUploadResult>
+}
+
 export interface IApi {
   hardware: IHardwareApi
+  upload: IUploadApi
 }
 
 declare global {

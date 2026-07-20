@@ -1,0 +1,368 @@
+/**
+ * UploadService
+ *
+ * Responsible for compiling firmware source and uploading compiled firmware
+ * to a connected board via the arduino-cli executable.
+ *
+ * Architectural rules:
+ * - Single responsibility: compile and upload firmware only.
+ * - Never communicates with the Renderer, IPC, or UI.
+ * - Reads CLI availability from ArduinoCLIService.getState() only — never modifies it.
+ * - Never throws to callers — all errors are returned as typed result objects.
+ * - compile() owns temp directory creation and transfers ownership to ICompiledFirmware.
+ * - upload() owns temp directory cleanup (always runs in finally block).
+ * - All CLI subprocesses use child_process.spawn (not exec) to avoid stdout buffer
+ *   limits on large firmware binaries.
+ *
+ * Public API:
+ * - compile(request)          → ICompileResult    (produces compiled artifact)
+ * - upload(firmware)          → IUploadResult     (consumes compiled artifact)
+ * - compileAndUpload(request) → IUploadResult     (thin convenience wrapper)
+ *
+ * Future consumers:
+ * - IPC handlers (Slice 9) will invoke compileAndUpload() in response to
+ *   hardware:upload channel calls from the Renderer.
+ * - HardwareManager may coordinate upload readiness checks before delegating.
+ */
+
+import { spawn } from 'child_process'
+import { randomUUID } from 'crypto'
+import * as fs from 'fs/promises'
+import * as path from 'path'
+import * as os from 'os'
+import { ArduinoCLIService } from './ArduinoCLIService'
+import type {
+  IUploadRequest,
+  ICompiledFirmware,
+  ICompileResult,
+  IUploadResult,
+  UploadErrorCode
+} from '@shared/types/upload'
+
+// ---------------------------------------------------------------------------
+// Private: subprocess execution
+// ---------------------------------------------------------------------------
+
+interface SpawnResult {
+  exitCode: number
+  stdout: string
+  stderr: string
+}
+
+/**
+ * Runs a CLI command as a child process, collecting stdout and stderr.
+ *
+ * Uses spawn (not exec) to avoid the default 200KB stdout buffer limit,
+ * which can be exceeded by verbose compiler output on large sketches.
+ * shell:true ensures PATH resolution matches the behaviour of exec() used
+ * in ArduinoCLIService, and guarantees the command resolves on Windows.
+ *
+ * This function never rejects — process errors are converted to exit code 1.
+ */
+function runProcess(command: string, args: string[]): Promise<SpawnResult> {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args, { shell: true })
+
+    let stdout = ''
+    let stderr = ''
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf-8')
+    })
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf-8')
+    })
+
+    proc.on('close', (code) => {
+      resolve({ exitCode: code ?? 1, stdout, stderr })
+    })
+
+    proc.on('error', (err) => {
+      // Handles ENOENT (command not found) and similar OS-level errors
+      resolve({ exitCode: 1, stdout: '', stderr: err.message })
+    })
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Private: error parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Translates raw arduino-cli compile stderr into a structured error.
+ * Patterns are matched in priority order — most specific first.
+ */
+function parseCompileError(stderr: string): { code: UploadErrorCode; error: string } {
+  if (stderr.includes('Compilation error:')) {
+    const match = stderr.match(/Compilation error:\s*(.+)/)
+    const detail = match?.[1]?.trim() ?? 'check your firmware source for syntax errors'
+    return { code: 'compile_failed', error: `Compilation failed: ${detail}` }
+  }
+
+  if (
+    stderr.includes('missing core') ||
+    stderr.includes('platform not installed') ||
+    (stderr.includes('platform') && stderr.includes('not found'))
+  ) {
+    return {
+      code: 'core_not_installed',
+      error: 'Missing board core. Install the required platform via arduino-cli.'
+    }
+  }
+
+  const firstLine = stderr
+    .split('\n')
+    .find((l) => l.trim().length > 0)
+    ?.trim()
+
+  return {
+    code: 'unknown',
+    error: `Unexpected error: ${firstLine ?? 'unknown compilation error'}`
+  }
+}
+
+/**
+ * Translates raw arduino-cli upload stderr into a structured error.
+ * Patterns are matched in priority order — most specific first.
+ */
+function parseUploadError(stderr: string, port: string): { code: UploadErrorCode; error: string } {
+  const lower = stderr.toLowerCase()
+
+  if (
+    lower.includes('no such port') ||
+    lower.includes('port not found') ||
+    lower.includes('cannot open') ||
+    lower.includes('access is denied')
+  ) {
+    return {
+      code: 'port_not_found',
+      error: `Board not found on port ${port}. Is it connected?`
+    }
+  }
+
+  if (lower.includes('an error occurred while uploading')) {
+    return {
+      code: 'upload_failed',
+      error: 'Upload failed. Try pressing the reset button and uploading again.'
+    }
+  }
+
+  if (lower.includes('missing core') || lower.includes('platform not installed')) {
+    return {
+      code: 'core_not_installed',
+      error: 'Missing board core. Install the required platform via arduino-cli.'
+    }
+  }
+
+  const firstLine = stderr
+    .split('\n')
+    .find((l) => l.trim().length > 0)
+    ?.trim()
+
+  return {
+    code: 'unknown',
+    error: `Unexpected error: ${firstLine ?? 'unknown upload error'}`
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Private: pre-flight validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validates that the CLI is available and the required board core is installed
+ * before attempting any subprocess execution.
+ *
+ * Returns a structured error object if validation fails, or null if all checks pass.
+ */
+function runPreflight(request: IUploadRequest): { code: UploadErrorCode; error: string } | null {
+  const cli = ArduinoCLIService.getState()
+
+  if (!cli.isInstalled) {
+    return {
+      code: 'cli_not_found',
+      error: 'arduino-cli not found. Ensure it is installed and available in PATH.'
+    }
+  }
+
+  if (!request.fqbn || request.fqbn.trim().length === 0) {
+    return {
+      code: 'fqbn_missing',
+      error: 'No FQBN specified. The board must have a valid FQBN to compile and upload firmware.'
+    }
+  }
+
+  // Derive platform core prefix from FQBN (e.g. "arduino:avr:uno" → "arduino:avr")
+  const parts = request.fqbn.split(':')
+  if (parts.length >= 2) {
+    const requiredCore = `${parts[0]}:${parts[1]}`
+    if (!cli.installedCores.includes(requiredCore)) {
+      return {
+        code: 'core_not_installed',
+        error: `Missing board core: "${requiredCore}". Install it via arduino-cli before uploading.`
+      }
+    }
+  }
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Private: temp directory helpers
+// ---------------------------------------------------------------------------
+
+const SKETCH_FOLDER_NAME = 'firmware'
+const SKETCH_FILE_NAME = 'firmware.ino'
+
+/**
+ * Creates a uniquely named temporary build directory and writes the firmware
+ * source into it with the directory structure required by arduino-cli:
+ *
+ *   <tmpdir>/iotosai-<uuid>/
+ *     firmware/
+ *       firmware.ino    ← arduino-cli requires dirname === filename (sans ext)
+ *
+ * Returns the root temp dir path (buildPath) and the sketch dir path separately.
+ */
+async function createTempBuild(source: string): Promise<{ buildPath: string; sketchDir: string }> {
+  const buildPath = path.join(os.tmpdir(), `iotosai-${randomUUID()}`)
+  const sketchDir = path.join(buildPath, SKETCH_FOLDER_NAME)
+  const sourceFile = path.join(sketchDir, SKETCH_FILE_NAME)
+
+  await fs.mkdir(sketchDir, { recursive: true })
+  await fs.writeFile(sourceFile, source, 'utf-8')
+
+  return { buildPath, sketchDir }
+}
+
+/**
+ * Removes the entire root temp build directory.
+ * Errors are suppressed — cleanup failure must never mask the primary result.
+ */
+async function cleanupBuild(buildPath: string): Promise<void> {
+  try {
+    await fs.rm(buildPath, { recursive: true, force: true })
+  } catch {
+    // Intentionally suppressed — temp dir cleanup is best-effort
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Compiles firmware source and returns a compiled artifact on success.
+ *
+ * On success:
+ *   Returns { status: 'success', firmware: ICompiledFirmware }.
+ *   Ownership of the temp build directory transfers to the returned artifact.
+ *   The caller MUST pass the artifact to upload() to trigger cleanup.
+ *
+ * On failure:
+ *   Cleans up the temp build directory before returning.
+ *   Returns { status: 'error', code, error, raw } — never throws.
+ */
+async function compile(request: IUploadRequest): Promise<ICompileResult> {
+  // Step 1: Pre-flight validation
+  const preflightError = runPreflight(request)
+  if (preflightError) {
+    return { status: 'error', ...preflightError }
+  }
+
+  // Step 2: Create temp build directory and write source
+  const { buildPath, sketchDir } = await createTempBuild(request.source)
+
+  // Step 3: Execute arduino-cli compile
+  const result = await runProcess('arduino-cli', ['compile', '--fqbn', request.fqbn, sketchDir])
+
+  if (result.exitCode === 0) {
+    // Ownership of buildPath transfers to the artifact — do NOT clean up here
+    return {
+      status: 'success',
+      firmware: {
+        port: request.port,
+        fqbn: request.fqbn,
+        buildPath
+      }
+    }
+  }
+
+  // Compilation failed — clean up before returning error
+  await cleanupBuild(buildPath)
+  const { code, error } = parseCompileError(result.stderr)
+  return { status: 'error', code, error, raw: result.stderr || undefined }
+}
+
+/**
+ * Uploads a previously compiled firmware artifact to its target port.
+ *
+ * Takes the ICompiledFirmware produced by compile() — no recompilation occurs.
+ * Always cleans up the artifact's buildPath in a finally block.
+ * The artifact is SPENT after this call returns; do not reuse it.
+ *
+ * Never throws — all errors are returned as { status: 'error', code, error, raw }.
+ */
+async function upload(firmware: ICompiledFirmware): Promise<IUploadResult> {
+  const sketchDir = path.join(firmware.buildPath, SKETCH_FOLDER_NAME)
+
+  try {
+    // Re-validate CLI is still available at upload time
+    const cli = ArduinoCLIService.getState()
+    if (!cli.isInstalled) {
+      return {
+        status: 'error',
+        code: 'cli_not_found',
+        error: 'arduino-cli not found. Ensure it is installed and available in PATH.'
+      }
+    }
+
+    const result = await runProcess('arduino-cli', [
+      'upload',
+      '-p',
+      firmware.port,
+      '--fqbn',
+      firmware.fqbn,
+      sketchDir
+    ])
+
+    if (result.exitCode === 0) {
+      return { status: 'success' }
+    }
+
+    const { code, error } = parseUploadError(result.stderr, firmware.port)
+    return { status: 'error', code, error, raw: result.stderr || undefined }
+  } finally {
+    // Always clean up — artifact is spent regardless of success or failure
+    await cleanupBuild(firmware.buildPath)
+  }
+}
+
+/**
+ * Convenience wrapper: compile followed by upload.
+ *
+ * Stops and returns the compile error if compilation fails (no upload attempted).
+ * Internally delegates entirely to compile() then upload() — contains no logic of its own.
+ *
+ * This is the primary entry point for the one-click upload workflow in V0.1.
+ */
+async function compileAndUpload(request: IUploadRequest): Promise<IUploadResult> {
+  const compiled = await compile(request)
+
+  if (compiled.status === 'error') {
+    // ICompileResult error shape is structurally identical to IUploadResult error shape
+    return compiled
+  }
+
+  return upload(compiled.firmware)
+}
+
+// ---------------------------------------------------------------------------
+// Exports
+// ---------------------------------------------------------------------------
+
+export const UploadService = Object.freeze({
+  compile,
+  upload,
+  compileAndUpload
+})

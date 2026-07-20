@@ -133,10 +133,10 @@ Do not revisit during V0.1:
 
 # Current Status
 
-- **Current Phase:** Phase 2: Hardware Detection (Slices 1-3 complete)
-- **Current Milestone:** M1: Ready for Hardware Integration
-- **Overall Progress:** Phase 1 (100%), Phase 2 (In Progress)
-- **Last Updated:** July 19, 2026
+- **Current Phase:** Phase 3: Firmware Upload (Slices 8-10 complete)
+- **Current Milestone:** M2: Upload Service & State Integration
+- **Overall Progress:** Phase 1 (100%), Phase 2 (100%), Phase 3 (In Progress)
+- **Last Updated:** July 20, 2026
 
 ---
 
@@ -158,6 +158,7 @@ Do not revisit during V0.1:
 | 2026-07-19 | Phase 2, Slices 1-3: Hardware Abstraction & Services                                                                           | Yes       | - Rejected monolithic service pattern for a decoupled `HardwareManager` + pure domain services.<br>- Created static, immutable `HardwareRegistry`.<br>- Resolved CH340 ambiguity by returning multiple candidates instead of guessing.<br>- Adopted discriminated union `IIdentificationResult`.                    | - `serialport` native bindings failed to rebuild locally on Windows due to missing VS Build Tools.<br>- Multiple clone boards share the exact same VID/PID (e.g. CH340). | - Deferred native port opening to Phase 4; used `SerialPort.list()` for Phase 2 enumeration.<br>- Designed `HardwareRegistry.findBoardsByVidPid` to surface ambiguity, letting `BoardIdentificationService` use heuristics. | Phase 2, Slice 4 (HardwareManager & EventBus).                              |
 | 2026-07-19 | Phase 2, Slice 4: HardwareManager & EventBus                                                                                   | Yes       | - Implemented `HardwareManager` as a pure orchestrator with dependency injection.<br>- Removed premature `selectBoard` functionality to respect the vertical slice philosophy.<br>- Created strongly typed `HardwareEventBus` using Node.js `EventEmitter`.                                                         | - Premature board selection logic was introduced without a legitimate caller.                                                                                            | - Removed `selectBoard` and `selectedBoardId` state from this slice, deferring it to Slice 5 (IPC), 6 (Zustand), and 7 (UI).                                                                                                | Phase 2, Slice 5 (IPC Bridge).                                              |
 | 2026-07-20 | Phase 2, Slices 5 & 6: IPC Bridge & Renderer State                                                                             | Yes       | - Created typed IPC boundary.<br>- Extended `useAppStore` with hardware slice.<br>- Runtime subscription handles (`_hardwareUnsubscribe`) intentionally kept outside Zustand state (in module scope) to keep store strictly serializable.                                                                           | - `hardware:refresh` was originally identical to `getState` and not triggering real I/O.<br>- Unsubscribe handle initially placed inside Zustand state.                  | - Fixed `refresh` IPC handler to invoke actual re-scan.<br>- Moved subscription handle to private module-level variable.                                                                                                    | Phase 2, Slice 7 (UI Integration).                                          |
+| 2026-07-20 | Phase 3, Slices 8-10: Upload Backend, IPC Bridge, & Renderer State                                                             | Yes       | - Split upload into independent `compile` and `upload` operations, using `ICompiledFirmware` as intermediate artifact.<br>- Delegated via pure `UploadIpcChannels`.<br>- Extended global Zustand store with upload actions delegating to preload API, preserving serializable state.                                        | - Duplicate firmware compilations could occur on retries.<br>- Combining domains would bloat IPC / State files.                                                          | - Redesigned UploadService to produce and consume `ICompiledFirmware`.<br>- Kept upload IPC and Zustand state separate from hardware domains.                                                                               | Phase 3, Slice 11 (Upload UI).                                              |
 
 ---
 

@@ -2,6 +2,15 @@
 
 All notable changes to the IoTOS AI prototype will be documented in this file.
 
+## Phase 3: Firmware Upload
+
+### Slice 10
+
+- Added Upload Zustand state slice to the global store without duplicating hardware or IPC state.
+- Implemented typed compile and upload actions delegating safely to the preload API.
+- Added typed `lastCompileResult` and `lastUploadResult` to store response artifacts.
+- Implemented `uploadLoading` and `uploadError` fields using try/finally for consistent error handling and state lifecycle.
+
 ## Phase 2: Hardware Detection
 
 ### Slice 1

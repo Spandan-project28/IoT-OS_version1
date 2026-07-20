@@ -7,6 +7,7 @@ import { ArduinoCLIService } from './hardware/ArduinoCLIService'
 import { SerialPortService } from './hardware/SerialPortService'
 import { BoardIdentificationService } from './hardware/BoardIdentificationService'
 import { hardwareIpcHandlers } from './ipc/hardwareIpcHandlers'
+import { uploadIpcHandlers } from './ipc/uploadIpcHandlers'
 
 // ---------------------------------------------------------------------------
 // Window factory
@@ -89,6 +90,9 @@ app.whenReady().then(async () => {
   // Step 3: Register IPC handlers (attach to the window so push events work).
   hardwareIpcHandlers.register(mainWindow)
 
+  // Upload handlers have no push events — no window reference needed.
+  uploadIpcHandlers.register()
+
   // Step 4: Start hardware discovery (async — does not block window display).
   HardwareManager.start().catch((err: unknown) => {
     console.error('[HardwareManager] Failed to start hardware discovery:', err)
@@ -115,6 +119,7 @@ app.on('before-quit', () => {
   // the shutdown sequence on Windows.
   HardwareManager.stop()
   hardwareIpcHandlers.remove()
+  uploadIpcHandlers.remove()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

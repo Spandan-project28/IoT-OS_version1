@@ -7,8 +7,11 @@
  * - This is the ONLY global store. Do NOT create a second hardware store.
  * - All window.api.hardware.* calls are made exclusively from this store.
  *   React components MUST NOT call window.api directly.
+ * - All window.api.upload.* calls are made exclusively from this store.
+ *   React components MUST NOT call window.api.upload.* directly.
  * - Components consume Zustand state through selectors only.
  * - The hardware slice communicates with the preload bridge through typed actions.
+ * - The upload slice communicates with the preload bridge through typed actions.
  * - The push-event unsubscribe handle is a module-level private variable —
  *   it is not application state and must never enter the Zustand state graph.
  *
@@ -18,14 +21,26 @@
  *   refreshHardware()     → force out-of-cycle scan + update store
  *   disposeHardware()     → unsubscribe push events + reset initialization flag
  *
+ * Upload state lifecycle:
+ *   compileFirmware(request)            → compile only, stores ICompileResult
+ *   uploadFirmware(firmware)            → upload compiled artifact, stores IUploadResult
+ *   compileAndUploadFirmware(request)   → compile + upload in one call, stores IUploadResult
+ *
  * Typical usage pattern:
  *   Call initializeHardware() once at the top-level component (AppProviders).
  *   Call disposeHardware() in the corresponding cleanup.
  *   Components read hardware state via useAppStore selectors.
+ *   Components trigger uploads via useAppStore upload actions.
  */
 
 import { create } from 'zustand'
 import type { IHardwareState } from '@shared/types/hardware'
+import type {
+  IUploadRequest,
+  ICompiledFirmware,
+  ICompileResult,
+  IUploadResult
+} from '@shared/types/upload'
 
 // ---------------------------------------------------------------------------
 // Phase 1 placeholder types (retained — consumed by existing UI components)
@@ -137,6 +152,43 @@ export interface AppState {
   hardwareError: string | null
 
   // -------------------------------------------------------------------------
+  // Upload State (Phase 3, Slice 10)
+  //
+  // Tracks the lifecycle of compile and upload operations.
+  // All values are serializable — no runtime handles, no Promises.
+  //
+  // Naming is intentionally distinct from the Phase 1 `uploadStatus`
+  // placeholder above, which is retained for existing UI consumers.
+  // -------------------------------------------------------------------------
+
+  /**
+   * True while a compile, upload, or compileAndUpload operation is in progress.
+   * Reset to false in the finally block of every async upload action.
+   */
+  uploadLoading: boolean
+
+  /**
+   * Human-readable error message from the last failed upload operation.
+   * Null when no error is present or when a new operation starts.
+   * Sourced from ICompileResult.error or IUploadResult.error — never thrown.
+   */
+  uploadError: string | null
+
+  /**
+   * The typed result of the last compile operation.
+   * Null before any compile has been attempted.
+   * Replaced on every compileFirmware() call regardless of outcome.
+   */
+  lastCompileResult: ICompileResult | null
+
+  /**
+   * The typed result of the last upload or compileAndUpload operation.
+   * Null before any upload has been attempted.
+   * Replaced on every uploadFirmware() or compileAndUploadFirmware() call.
+   */
+  lastUploadResult: IUploadResult | null
+
+  // -------------------------------------------------------------------------
   // UI Actions
   // -------------------------------------------------------------------------
 
@@ -194,6 +246,51 @@ export interface AppState {
    * the component briefly unmounts and remounts.
    */
   disposeHardware: () => void
+
+  // -------------------------------------------------------------------------
+  // Upload Actions (Phase 3, Slice 10)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Compiles firmware source only. Does not upload.
+   *
+   * Updates uploadLoading while the compile operation is in progress.
+   * Stores the typed ICompileResult (success or error) in lastCompileResult.
+   * On failure, sets uploadError to the human-readable error message.
+   * Never throws into React — all errors are captured in store state.
+   *
+   * Use this when you need the compiled artifact to pass to uploadFirmware()
+   * separately (e.g. compile-once / upload-many workflows).
+   */
+  compileFirmware: (request: IUploadRequest) => Promise<void>
+
+  /**
+   * Uploads a previously compiled firmware artifact to the target board.
+   *
+   * Takes the ICompiledFirmware artifact produced by a prior compileFirmware()
+   * call (available inside lastCompileResult on success). The artifact is spent
+   * after this call — UploadService cleans up the temp build directory.
+   *
+   * Updates uploadLoading while the upload is in progress.
+   * Stores the typed IUploadResult in lastUploadResult.
+   * On failure, sets uploadError to the human-readable error message.
+   * Never throws into React.
+   */
+  uploadFirmware: (firmware: ICompiledFirmware) => Promise<void>
+
+  /**
+   * Compiles firmware source then uploads to the target board in one call.
+   *
+   * This is the primary action for the one-click upload workflow in V0.1.
+   * Stops and stores the compile error if compilation fails — no upload
+   * is attempted in that case.
+   *
+   * Updates uploadLoading while the operation is in progress.
+   * Stores the typed IUploadResult in lastUploadResult.
+   * On failure, sets uploadError to the human-readable error message.
+   * Never throws into React.
+   */
+  compileAndUploadFirmware: (request: IUploadRequest) => Promise<void>
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +351,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   hardwareInitialized: false,
   hardwareLoading: false,
   hardwareError: null,
+
+  // -------------------------------------------------------------------------
+  // Upload State initial values (Phase 3, Slice 10)
+  // -------------------------------------------------------------------------
+
+  uploadLoading: false,
+  uploadError: null,
+  lastCompileResult: null,
+  lastUploadResult: null,
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -329,5 +435,71 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({ hardwareInitialized: false })
+  },
+
+  // -------------------------------------------------------------------------
+  // Upload Actions (Phase 3, Slice 10)
+  // -------------------------------------------------------------------------
+
+  compileFirmware: async (request: IUploadRequest) => {
+    if (!window.api?.upload) return
+
+    set({ uploadLoading: true, uploadError: null })
+
+    try {
+      const result = await window.api.upload.compile(request)
+      set({ lastCompileResult: result })
+
+      if (result.status === 'error') {
+        set({ uploadError: result.error })
+      }
+    } catch (err: unknown) {
+      // IPC transport errors — UploadService itself never throws,
+      // but the IPC layer can fail if the Main process is unavailable.
+      const message = err instanceof Error ? err.message : 'Compilation failed unexpectedly.'
+      set({ uploadError: message })
+    } finally {
+      set({ uploadLoading: false })
+    }
+  },
+
+  uploadFirmware: async (firmware: ICompiledFirmware) => {
+    if (!window.api?.upload) return
+
+    set({ uploadLoading: true, uploadError: null })
+
+    try {
+      const result = await window.api.upload.upload(firmware)
+      set({ lastUploadResult: result })
+
+      if (result.status === 'error') {
+        set({ uploadError: result.error })
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Upload failed unexpectedly.'
+      set({ uploadError: message })
+    } finally {
+      set({ uploadLoading: false })
+    }
+  },
+
+  compileAndUploadFirmware: async (request: IUploadRequest) => {
+    if (!window.api?.upload) return
+
+    set({ uploadLoading: true, uploadError: null })
+
+    try {
+      const result = await window.api.upload.compileAndUpload(request)
+      set({ lastUploadResult: result })
+
+      if (result.status === 'error') {
+        set({ uploadError: result.error })
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Compile and upload failed unexpectedly.'
+      set({ uploadError: message })
+    } finally {
+      set({ uploadLoading: false })
+    }
   }
 }))

@@ -35,9 +35,10 @@
  */
 
 import type { IHardwareState } from './hardware'
+import type { IUploadRequest, ICompiledFirmware, ICompileResult, IUploadResult } from './upload'
 
 // ---------------------------------------------------------------------------
-// Channel name constants
+// Hardware channels
 // ---------------------------------------------------------------------------
 
 /**
@@ -72,7 +73,7 @@ export const HardwareIpcChannels = Object.freeze({
 } as const)
 
 // ---------------------------------------------------------------------------
-// Payload types
+// Hardware payload types
 // ---------------------------------------------------------------------------
 
 /**
@@ -93,3 +94,93 @@ export type HardwareRefreshResult = IHardwareState
  * Renderer receives this whenever hardware state mutates.
  */
 export type HardwareStateChangedPayload = IHardwareState
+
+// ---------------------------------------------------------------------------
+// Upload channels
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the upload subsystem.
+ *
+ * Intentionally separate from HardwareIpcChannels — the upload domain
+ * is independent of hardware detection and must remain decoupled.
+ *
+ * All three channels are Renderer → Main invoke calls.
+ * No push events are defined in this slice (progress streaming is deferred).
+ *
+ * Usage (Main):
+ *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
+ *
+ * Usage (Renderer):
+ *   window.api.upload.compile(request)
+ *   window.api.upload.compileAndUpload(request)
+ */
+export const UploadIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Compiles firmware source and returns a compiled artifact on success.
+   * Request:  IUploadRequest
+   * Response: ICompileResult
+   */
+  compile: 'upload:compile' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Uploads a previously compiled firmware artifact to the target port.
+   * Request:  ICompiledFirmware
+   * Response: IUploadResult
+   */
+  upload: 'upload:upload' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Compiles firmware source then uploads to the target port in one call.
+   * Stops and returns the compile error if compilation fails.
+   * Request:  IUploadRequest
+   * Response: IUploadResult
+   */
+  compileAndUpload: 'upload:compileAndUpload' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Upload payload types
+// ---------------------------------------------------------------------------
+
+/**
+ * Request payload for the upload:compile invoke channel.
+ * Passed from Renderer → Preload → ipcRenderer.invoke() → ipcMain.handle().
+ */
+export type UploadCompileRequest = IUploadRequest
+
+/**
+ * Response payload for the upload:compile invoke channel.
+ * Returned by UploadService.compile() without transformation.
+ */
+export type UploadCompileResult = ICompileResult
+
+/**
+ * Request payload for the upload:upload invoke channel.
+ * The ICompiledFirmware artifact produced by a prior upload:compile call.
+ */
+export type UploadUploadRequest = ICompiledFirmware
+
+/**
+ * Response payload for the upload:upload invoke channel.
+ * Returned by UploadService.upload() without transformation.
+ */
+export type UploadUploadResult = IUploadResult
+
+/**
+ * Request payload for the upload:compileAndUpload invoke channel.
+ * Same as UploadCompileRequest — the full IUploadRequest.
+ */
+export type UploadCompileAndUploadRequest = IUploadRequest
+
+/**
+ * Response payload for the upload:compileAndUpload invoke channel.
+ * Returned by UploadService.compileAndUpload() without transformation.
+ */
+export type UploadCompileAndUploadResult = IUploadResult
