@@ -165,6 +165,19 @@ function isPolling(): boolean {
   return _pollInterval !== null
 }
 
+/**
+ * Performs a single immediate port scan outside the regular polling interval.
+ *
+ * Used by HardwareManager.refresh() to force an out-of-cycle re-scan when
+ * the Renderer explicitly requests updated hardware state.
+ *
+ * This method is safe to call regardless of whether polling is active.
+ * It does not disturb the existing interval timer.
+ */
+async function pollNow(): Promise<void> {
+  await poll()
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -174,5 +187,6 @@ export const SerialPortService = Object.freeze({
   startPolling,
   stopPolling,
   getPorts,
-  isPolling
+  isPolling,
+  pollNow
 })

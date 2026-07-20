@@ -1,53 +1,87 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import { HardwareIpcChannels } from '@shared/types/ipc'
+import type { IHardwareState } from '@shared/types/hardware'
 
-// Custom APIs for renderer
-const api = {
-  board: {
-    getConnected: () => ipcRenderer.invoke('board:getConnected'),
-    onWatch: (callback: (event: unknown, data: unknown) => void) => {
-      ipcRenderer.on('board:watch', callback)
-      return () => ipcRenderer.removeListener('board:watch', callback)
+// ---------------------------------------------------------------------------
+// Hardware API
+//
+// Exposes a minimal, typed bridge for the hardware subsystem.
+//
+// Architectural rules:
+// - This bridge ONLY wraps ipcRenderer calls. No business logic lives here.
+// - The Renderer never imports Electron directly — all IPC passes through this bridge.
+// - Listener registration returns an unsubscribe function so callers can
+//   clean up without knowing internal ipcRenderer channel names.
+// - All types flow from @shared/types — preload imports them from there,
+//   the Renderer imports them through the window.api type declaration.
+//
+// Channels:
+//   hardware.getState()             — invoke hardware:getState
+//   hardware.refresh()              — invoke hardware:refresh
+//   hardware.onStateChanged(cb)     — subscribe to hardware:stateChanged push events
+//                                     returns () => void unsubscribe function
+// ---------------------------------------------------------------------------
+
+const hardwareApi = {
+  /**
+   * Returns the current IHardwareState snapshot from the Main process.
+   * No side effects — does not trigger a refresh cycle.
+   */
+  getState: (): Promise<IHardwareState> =>
+    ipcRenderer.invoke(HardwareIpcChannels.getState) as Promise<IHardwareState>,
+
+  /**
+   * Fetches the latest IHardwareState from the Main process.
+   * Reserved for user-initiated refresh actions in a future phase.
+   */
+  refresh: (): Promise<IHardwareState> =>
+    ipcRenderer.invoke(HardwareIpcChannels.refresh) as Promise<IHardwareState>,
+
+  /**
+   * Subscribes to hardware state change push events from the Main process.
+   *
+   * The Main process calls webContents.send(hardware:stateChanged, state)
+   * whenever HardwareManager emits a hardwareStateChanged event.
+   *
+   * @param callback - Called with the updated IHardwareState on each push.
+   * @returns An unsubscribe function. Call it in useEffect cleanup to avoid
+   *   stale listeners accumulating across component mounts.
+   */
+  onStateChanged: (callback: (state: IHardwareState) => void): (() => void) => {
+    // Wrap callback to extract the payload from the IPC event envelope.
+    const handler = (_event: Electron.IpcRendererEvent, state: IHardwareState): void => {
+      callback(state)
     }
-  },
-  upload: {
-    start: (projectPath: string, boardType: string, port: string) =>
-      ipcRenderer.invoke('upload:start', { projectPath, boardType, port }),
-    cancel: () => ipcRenderer.invoke('upload:cancel'),
-    onProgress: (callback: (event: unknown, data: unknown) => void) => {
-      ipcRenderer.on('upload:progress', callback)
-      return () => ipcRenderer.removeListener('upload:progress', callback)
+
+    ipcRenderer.on(HardwareIpcChannels.stateChanged, handler)
+
+    // Return unsubscribe function — the caller is responsible for invoking it.
+    return () => {
+      ipcRenderer.removeListener(HardwareIpcChannels.stateChanged, handler)
     }
-  },
-  serial: {
-    start: (port: string, baudRate: number) =>
-      ipcRenderer.invoke('serial:start', { port, baudRate }),
-    stop: () => ipcRenderer.invoke('serial:stop'),
-    clear: () => ipcRenderer.invoke('serial:clear'),
-    onData: (callback: (event: unknown, data: string) => void) => {
-      ipcRenderer.on('serial:data', callback)
-      return () => ipcRenderer.removeListener('serial:data', callback)
-    }
-  },
-  ai: {
-    generate: (prompt: string, boardType: string) =>
-      ipcRenderer.invoke('ai:generate', { prompt, boardType })
-  },
-  project: {
-    new: (name: string, boardType: string) =>
-      ipcRenderer.invoke('project:new', { name, boardType }),
-    open: (path: string) => ipcRenderer.invoke('project:open', path),
-    save: (path: string, code: string) => ipcRenderer.invoke('project:save', { path, code })
-  },
-  settings: {
-    get: () => ipcRenderer.invoke('settings:get'),
-    set: (settings: unknown) => ipcRenderer.invoke('settings:set', settings)
   }
 }
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
+// ---------------------------------------------------------------------------
+// Composed API surface
+//
+// All future subsystems (upload, serial, ai, project, settings) will be added
+// here as additional namespaced objects when their IPC slices are implemented.
+// ---------------------------------------------------------------------------
+
+const api = {
+  hardware: hardwareApi
+}
+
+// ---------------------------------------------------------------------------
+// Context bridge
+//
+// Expose the API object to the Renderer via contextBridge.
+// If context isolation is disabled (development edge case), fall back to direct
+// window assignment — this mirrors the electron-vite scaffold convention.
+// ---------------------------------------------------------------------------
+
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)

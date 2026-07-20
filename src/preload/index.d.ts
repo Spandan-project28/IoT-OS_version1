@@ -1,41 +1,48 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { IHardwareState } from '@shared/types/hardware'
+
+/**
+ * IApi
+ *
+ * The complete type contract for window.api as exposed through the preload bridge.
+ *
+ * Architectural rules:
+ * - This declaration file is the Renderer's view of the preload API.
+ * - It mirrors the runtime object in preload/index.ts exactly.
+ * - Types are imported from @shared/types — never duplicated.
+ * - Future subsystems (upload, serial, ai, project, settings) are added here
+ *   alongside their preload implementation, in their respective slices.
+ *
+ * All types are imported using relative paths because this .d.ts is loaded
+ * by tsconfig.web.json which does not have the @shared path alias configured
+ * the same way as tsconfig.node.json.
+ */
+export interface IHardwareApi {
+  /**
+   * Returns the current IHardwareState snapshot.
+   * No side effects — does not trigger a refresh.
+   */
+  getState: () => Promise<IHardwareState>
+
+  /**
+   * Returns the latest IHardwareState.
+   * Reserved for future user-initiated refresh actions.
+   */
+  refresh: () => Promise<IHardwareState>
+
+  /**
+   * Subscribes to hardware state push events from the Main process.
+   *
+   * The callback is invoked whenever the hardware layer detects a change
+   * (port connected/disconnected, CLI state updated, identification completed).
+   *
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onStateChanged: (callback: (state: IHardwareState) => void) => () => void
+}
 
 export interface IApi {
-  board: {
-    getConnected: () => Promise<unknown[]>
-    onWatch: (callback: (event: unknown, data: unknown) => void) => () => void
-  }
-  upload: {
-    start: (projectPath: string, boardType: string, port: string) => Promise<unknown>
-    cancel: () => Promise<unknown>
-    onProgress: (callback: (event: unknown, data: unknown) => void) => () => void
-  }
-  serial: {
-    start: (port: string, baudRate: number) => Promise<unknown>
-    stop: () => Promise<unknown>
-    clear: () => Promise<unknown>
-    onData: (callback: (event: unknown, data: string) => void) => () => void
-  }
-  ai: {
-    generate: (
-      prompt: string,
-      boardType: string
-    ) => Promise<{
-      code: string
-      explanation: string
-      components: string[]
-      wiring: string
-    }>
-  }
-  project: {
-    new: (name: string, boardType: string) => Promise<unknown>
-    open: (path: string) => Promise<unknown>
-    save: (path: string, code: string) => Promise<unknown>
-  }
-  settings: {
-    get: () => Promise<unknown>
-    set: (settings: unknown) => Promise<unknown>
-  }
+  hardware: IHardwareApi
 }
 
 declare global {

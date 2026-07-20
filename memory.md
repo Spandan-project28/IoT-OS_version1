@@ -99,6 +99,21 @@ Never duplicate information from the other documentation. Record changes and rea
   - Phase 2 uses `SerialPort.list()` exclusively for device enumeration. Native port opening and streaming will be introduced in Phase 4 once the required Windows build environment is available. This is a phased implementation decision rather than a change in architecture.
   - A 2-second polling interval via the built-in listing mechanism is sufficient for the Phase 2 discovery requirements.
 
+### ADR-008
+
+- **Status:** Accepted
+- **Decision:** Typed IPC Boundary. All communication between the Electron Main process and Renderer must pass through a typed IPC contract located in `src/shared/types/ipc.ts`.
+- **Reason:**
+  - Single source of truth for IPC contracts
+  - Compile-time safety
+  - Elimination of magic IPC channel strings
+  - Strong separation between Main and Renderer
+  - Easier future extension without breaking API compatibility
+- **Consequences:**
+  - Every new IPC channel must be defined in `src/shared/types/ipc.ts`
+  - Preload remains a thin bridge
+  - Renderer depends only on typed APIs
+
 ---
 
 # Locked Decisions
@@ -141,7 +156,7 @@ Do not revisit during V0.1:
 | 2026-07-18 | Scaffold Electron + React + TS project, structure folders, and configure Tailwind v4, Zustand, Monaco, and preload IPC bridge. | Yes       | - Refactored default nested `src/renderer/src` to flat `src/renderer` matching `ARCHITECTURE.md`. <br> - Used Tailwind v4 Vite plugin.                                                                                                                                                                              | - electron-vite template placed React code inside `src/renderer/src`. <br> - Tailwind v4 caused build failure with standard PostCSS setup.                               | - Updated tsconfig.web.json, aliases, and index.html to target direct `src/renderer/` root. <br> - Switched to native `@tailwindcss/vite` plugin and removed postcss/tailwind config files.                                 | Begin Phase 1 (Application Shell, Sidebar navigation, page layout mockups). |
 | 2026-07-19 | Implement Phase 1: Application Shell                                                                                           | Yes       | - Hybrid Theme (Light workspace, Dark Sidebar/TopBar) instead of Dark-first.<br>- Premium visual language inspired by Cursor/Arc.<br>- CSS variables in `main.css` for semantic styling.<br>- Topbar/Sidebar specific styling conventions.<br>- Shared UI components (`Button`, `Card`, `Badge`, `EmptyWorkspace`). | - UI initially felt like a generic Tailwind dashboard.<br>- Hardcoded hex values caused technical debt.                                                                  | - Redesigned to use a Hybrid Theme.<br>- Refactored hardcoded hex codes into semantic CSS tokens and Tailwind v4 variables.                                                                                                 | Begin Phase 2 (Hardware Detection & Serial Communication).                  |
 | 2026-07-19 | Phase 2, Slices 1-3: Hardware Abstraction & Services                                                                           | Yes       | - Rejected monolithic service pattern for a decoupled `HardwareManager` + pure domain services.<br>- Created static, immutable `HardwareRegistry`.<br>- Resolved CH340 ambiguity by returning multiple candidates instead of guessing.<br>- Adopted discriminated union `IIdentificationResult`.                    | - `serialport` native bindings failed to rebuild locally on Windows due to missing VS Build Tools.<br>- Multiple clone boards share the exact same VID/PID (e.g. CH340). | - Deferred native port opening to Phase 4; used `SerialPort.list()` for Phase 2 enumeration.<br>- Designed `HardwareRegistry.findBoardsByVidPid` to surface ambiguity, letting `BoardIdentificationService` use heuristics. | Phase 2, Slice 4 (HardwareManager & EventBus).                              |
-| 2026-07-19 | Phase 2, Slice 4: HardwareManager & EventBus                                                                                   | Yes       | - Implemented `HardwareManager` as a pure orchestrator with dependency injection.<br>- Removed premature `selectBoard` functionality to respect the vertical slice philosophy.<br>- Created strongly typed `HardwareEventBus` using Node.js `EventEmitter`.                 | - Premature board selection logic was introduced without a legitimate caller.                                                                                            | - Removed `selectBoard` and `selectedBoardId` state from this slice, deferring it to Slice 5 (IPC), 6 (Zustand), and 7 (UI).                                                                                | Phase 2, Slice 5 (IPC Bridge).                                              |
+| 2026-07-19 | Phase 2, Slice 4: HardwareManager & EventBus                                                                                   | Yes       | - Implemented `HardwareManager` as a pure orchestrator with dependency injection.<br>- Removed premature `selectBoard` functionality to respect the vertical slice philosophy.<br>- Created strongly typed `HardwareEventBus` using Node.js `EventEmitter`.                                                         | - Premature board selection logic was introduced without a legitimate caller.                                                                                            | - Removed `selectBoard` and `selectedBoardId` state from this slice, deferring it to Slice 5 (IPC), 6 (Zustand), and 7 (UI).                                                                                                | Phase 2, Slice 5 (IPC Bridge).                                              |
 
 ---
 

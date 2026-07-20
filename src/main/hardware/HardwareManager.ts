@@ -221,6 +221,48 @@ function isRunning(): boolean {
   return _running
 }
 
+/**
+ * Forces an out-of-cycle hardware refresh and returns the updated snapshot.
+ *
+ * Sequence:
+ * 1. Re-queries arduino-cli (version + installed cores).
+ * 2. Performs an immediate port scan outside the normal 2-second interval.
+ * 3. Re-runs board identification against the fresh port list.
+ * 4. Assembles and returns a new IHardwareState snapshot.
+ *
+ * Unlike getState(), this method performs real I/O. It is intended for
+ * user-initiated "refresh" actions in the Renderer (e.g. a "Scan again" button
+ * or a one-time query on page load before the first push event arrives).
+ *
+ * If the hardware lifecycle is not running, returns the same safe empty state
+ * as getState() — no I/O is performed.
+ */
+async function refresh(): Promise<IHardwareState> {
+  if (!_services || !_running) {
+    return {
+      cli: { isInstalled: false, version: null, installedCores: [] },
+      ports: [],
+      connectedBoards: [],
+      selectedBoardId: null,
+      isScanning: false,
+      lastScanTimestamp: 0
+    }
+  }
+
+  // Step 1: Re-query Arduino CLI
+  const cli = await _services.cli.refresh()
+  HardwareEventBus.emit('cliStateChanged', cli)
+
+  // Step 2: Immediate port re-scan (out of the 2-second interval)
+  await _services.ports.pollNow()
+
+  // Step 3: Re-run identification against the freshly scanned port list
+  runIdentificationCycle()
+
+  // Step 4: Assemble and return the updated snapshot
+  return assembleSnapshot()
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -230,5 +272,6 @@ export const HardwareManager = Object.freeze({
   start,
   stop,
   getState,
+  refresh,
   isRunning
 })
