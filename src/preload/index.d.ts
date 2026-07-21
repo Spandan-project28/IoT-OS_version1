@@ -6,6 +6,14 @@ import type {
   ICompileResult,
   IUploadResult
 } from '@shared/types/upload'
+import type {
+  ISerialOpenRequest,
+  ISerialCloseRequest,
+  ISerialWriteRequest,
+  ISerialDataPayload,
+  ISerialStatusPayload,
+  ISerialResult
+} from '@shared/types/serial'
 
 /**
  * IApi
@@ -70,9 +78,46 @@ export interface IUploadApi {
   compileAndUpload: (request: IUploadRequest) => Promise<IUploadResult>
 }
 
+export interface ISerialApi {
+  /**
+   * Opens a new serial session on the specified port with the given settings.
+   * Returns { status: 'success' } on success or a typed error on failure.
+   */
+  open: (request: ISerialOpenRequest) => Promise<ISerialResult>
+
+  /**
+   * Closes the active serial session for the specified port.
+   * Returns { status: 'success' } on success or a typed error if not open.
+   */
+  close: (request: ISerialCloseRequest) => Promise<ISerialResult>
+
+  /**
+   * Writes text to the active serial session for the specified port.
+   * The newline setting from request.newline is applied in the Main process.
+   * Returns { status: 'success' } on success or a typed error on failure.
+   */
+  write: (request: ISerialWriteRequest) => Promise<ISerialResult>
+
+  /**
+   * Subscribes to serial:data push events from the Main process.
+   * Called once per parsed line from any active serial session.
+   * The payload includes the port path for per-port routing in the store.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onData: (callback: (payload: ISerialDataPayload) => void) => () => void
+
+  /**
+   * Subscribes to serial:statusChanged push events from the Main process.
+   * Called whenever a session transitions lifecycle state.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onStatusChanged: (callback: (payload: ISerialStatusPayload) => void) => () => void
+}
+
 export interface IApi {
   hardware: IHardwareApi
   upload: IUploadApi
+  serial: ISerialApi
 }
 
 declare global {

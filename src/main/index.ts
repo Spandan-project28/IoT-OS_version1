@@ -8,6 +8,7 @@ import { SerialPortService } from './hardware/SerialPortService'
 import { BoardIdentificationService } from './hardware/BoardIdentificationService'
 import { hardwareIpcHandlers } from './ipc/hardwareIpcHandlers'
 import { uploadIpcHandlers } from './ipc/uploadIpcHandlers'
+import { serialIpcHandlers } from './ipc/serialIpcHandlers'
 
 // ---------------------------------------------------------------------------
 // Window factory
@@ -93,6 +94,10 @@ app.whenReady().then(async () => {
   // Upload handlers have no push events — no window reference needed.
   uploadIpcHandlers.register()
 
+  // Serial handlers have push events (serial:data, serial:statusChanged) —
+  // window reference is required.
+  serialIpcHandlers.register(mainWindow)
+
   // Step 4: Start hardware discovery (async — does not block window display).
   HardwareManager.start().catch((err: unknown) => {
     console.error('[HardwareManager] Failed to start hardware discovery:', err)
@@ -105,6 +110,7 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const newWindow = createWindow()
       hardwareIpcHandlers.register(newWindow)
+      serialIpcHandlers.register(newWindow)
     }
   })
 })
@@ -120,6 +126,9 @@ app.on('before-quit', () => {
   HardwareManager.stop()
   hardwareIpcHandlers.remove()
   uploadIpcHandlers.remove()
+  // Close all active serial sessions and remove serial IPC handlers.
+  // serialIpcHandlers.remove() calls SerialService.closeAll() internally.
+  serialIpcHandlers.remove()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

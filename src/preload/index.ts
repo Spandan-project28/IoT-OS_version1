@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { HardwareIpcChannels, UploadIpcChannels } from '@shared/types/ipc'
+import { HardwareIpcChannels, UploadIpcChannels, SerialIpcChannels } from '@shared/types/ipc'
 import type { IHardwareState } from '@shared/types/hardware'
 import type {
   IUploadRequest,
@@ -8,6 +8,14 @@ import type {
   ICompileResult,
   IUploadResult
 } from '@shared/types/upload'
+import type {
+  ISerialOpenRequest,
+  ISerialCloseRequest,
+  ISerialWriteRequest,
+  ISerialDataPayload,
+  ISerialStatusPayload,
+  ISerialResult
+} from '@shared/types/serial'
 
 // ---------------------------------------------------------------------------
 // Hardware API
@@ -111,15 +119,101 @@ const uploadApi = {
 }
 
 // ---------------------------------------------------------------------------
+// Serial API
+//
+// Exposes a minimal, typed bridge for the serial subsystem.
+//
+// Architectural rules:
+// - Thin bridge only — no business logic.
+// - open/close/write are invoke/response channels.
+// - onData and onStatusChanged subscribe to push channels and return
+//   unsubscribe functions, exactly like hardware.onStateChanged().
+// - Types flow from @shared/types/serial — no duplication.
+//
+// Channels:
+//   serial.open(request)              — invoke serial:open
+//   serial.close(request)             — invoke serial:close
+//   serial.write(request)             — invoke serial:write
+//   serial.onData(cb)                 — subscribe to serial:data push events
+//                                       returns () => void unsubscribe function
+//   serial.onStatusChanged(cb)        — subscribe to serial:statusChanged push events
+//                                       returns () => void unsubscribe function
+// ---------------------------------------------------------------------------
+
+const serialApi = {
+  /**
+   * Opens a new serial session on the specified port with the given settings.
+   * Returns { status: 'success' } on success or a typed error on failure.
+   */
+  open: (request: ISerialOpenRequest): Promise<ISerialResult> =>
+    ipcRenderer.invoke(SerialIpcChannels.open, request) as Promise<ISerialResult>,
+
+  /**
+   * Closes the active serial session for the specified port.
+   * Returns { status: 'success' } on success or a typed error if not open.
+   */
+  close: (request: ISerialCloseRequest): Promise<ISerialResult> =>
+    ipcRenderer.invoke(SerialIpcChannels.close, request) as Promise<ISerialResult>,
+
+  /**
+   * Writes text to the active serial session for the specified port.
+   * The newline setting from request.newline is applied in the Main process.
+   * Returns { status: 'success' } on success or a typed error on failure.
+   */
+  write: (request: ISerialWriteRequest): Promise<ISerialResult> =>
+    ipcRenderer.invoke(SerialIpcChannels.write, request) as Promise<ISerialResult>,
+
+  /**
+   * Subscribes to serial:data push events from the Main process.
+   *
+   * Called once per parsed line from any active serial session.
+   * The payload includes the port path so the Renderer can route the line
+   * to the correct per-port log store.
+   *
+   * @param callback - Called with ISerialDataPayload on each push.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onData: (callback: (payload: ISerialDataPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ISerialDataPayload): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(SerialIpcChannels.data, handler)
+    return () => {
+      ipcRenderer.removeListener(SerialIpcChannels.data, handler)
+    }
+  },
+
+  /**
+   * Subscribes to serial:statusChanged push events from the Main process.
+   *
+   * Called whenever a session transitions lifecycle state:
+   * opened (connected), closed (closed), or error (error).
+   *
+   * @param callback - Called with ISerialStatusPayload on each push.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onStatusChanged: (callback: (payload: ISerialStatusPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ISerialStatusPayload): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(SerialIpcChannels.statusChanged, handler)
+    return () => {
+      ipcRenderer.removeListener(SerialIpcChannels.statusChanged, handler)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Composed API surface
 //
-// All future subsystems (serial, ai, project, settings) will be added
-// here as additional namespaced objects when their IPC slices are implemented.
+// All future subsystems (ai, project, settings) will be added here as
+// additional namespaced objects when their IPC slices are implemented.
 // ---------------------------------------------------------------------------
 
 const api = {
   hardware: hardwareApi,
-  upload: uploadApi
+  upload: uploadApi,
+  serial: serialApi
 }
 
 // ---------------------------------------------------------------------------

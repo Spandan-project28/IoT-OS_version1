@@ -20,21 +20,41 @@
  *   upload:upload           — Renderer → Main invoke, returns IUploadResult.
  *   upload:compileAndUpload — Renderer → Main invoke, returns IUploadResult.
  *
+ * Serial channels (Phase 4, Slice 15):
+ *   serial:open          — Renderer → Main invoke, opens a port, returns ISerialResult.
+ *   serial:close         — Renderer → Main invoke, closes a port, returns ISerialResult.
+ *   serial:write         — Renderer → Main invoke, writes text to a port, returns ISerialResult.
+ *   serial:data          — Main → Renderer push, delivers one parsed line per event.
+ *   serial:statusChanged — Main → Renderer push, delivers session lifecycle transitions.
+ *
  * Usage (Main):
  *   ipcMain.handle(HardwareIpcChannels.getState, () => HardwareManager.getState())
  *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
+ *   ipcMain.handle(SerialIpcChannels.open, (_, req) => SerialService.open(req))
  *
  * Usage (Preload):
  *   ipcRenderer.invoke(HardwareIpcChannels.getState)
  *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
+ *   ipcRenderer.invoke(SerialIpcChannels.open, request)
+ *   ipcRenderer.on(SerialIpcChannels.data, handler)
  *
  * Usage (Renderer):
  *   window.api.hardware.getState()
  *   window.api.upload.compileAndUpload(request)
+ *   window.api.serial.open(request)
+ *   window.api.serial.onData(callback)
  */
 
 import type { IHardwareState } from './hardware'
 import type { IUploadRequest, ICompiledFirmware, ICompileResult, IUploadResult } from './upload'
+import type {
+  ISerialOpenRequest,
+  ISerialCloseRequest,
+  ISerialWriteRequest,
+  ISerialDataPayload,
+  ISerialStatusPayload,
+  ISerialResult
+} from './serial'
 
 // ---------------------------------------------------------------------------
 // Hardware channels
@@ -182,3 +202,108 @@ export type UploadCompileAndUploadRequest = IUploadRequest
  * Response payload for the upload:compileAndUpload invoke channel.
  */
 export type UploadCompileAndUploadResult = IUploadResult
+
+// ---------------------------------------------------------------------------
+// Serial channels
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the serial subsystem.
+ *
+ * Intentionally separate from HardwareIpcChannels and UploadIpcChannels —
+ * serial communication is an independent domain.
+ *
+ * Invoke channels (Renderer → Main, awaitable response):
+ *   serial:open   — opens a port session, returns ISerialResult.
+ *   serial:close  — closes a port session, returns ISerialResult.
+ *   serial:write  — writes text to an open session, returns ISerialResult.
+ *
+ * Push channels (Main → Renderer, one-way):
+ *   serial:data          — pushed per parsed line from a session.
+ *   serial:statusChanged — pushed on every session lifecycle transition.
+ *
+ * Usage (Main):
+ *   ipcMain.handle(SerialIpcChannels.open, (_, req) => SerialService.open(req))
+ *   mainWindow.webContents.send(SerialIpcChannels.data, payload)
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(SerialIpcChannels.open, request)
+ *   ipcRenderer.on(SerialIpcChannels.data, handler)
+ *
+ * Usage (Renderer):
+ *   window.api.serial.open(request)
+ *   window.api.serial.onData(callback)
+ */
+export const SerialIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Opens a new serial session on the specified port.
+   * Request:  ISerialOpenRequest
+   * Response: ISerialResult
+   */
+  open: 'serial:open' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Closes the active serial session for the specified port.
+   * Request:  ISerialCloseRequest
+   * Response: ISerialResult
+   */
+  close: 'serial:close' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Writes text to the active serial session for the specified port.
+   * Request:  ISerialWriteRequest
+   * Response: ISerialResult
+   */
+  write: 'serial:write' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent for every parsed line received from a serial session.
+   * One event per line — no batching in V0.1.
+   * Renderer subscribes via window.api.serial.onData().
+   */
+  data: 'serial:data' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent whenever a session transitions lifecycle state:
+   * opened (connected), closed (closed), or error (error).
+   * Renderer subscribes via window.api.serial.onStatusChanged().
+   */
+  statusChanged: 'serial:statusChanged' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Serial payload type aliases
+//
+// Documentation-only type aliases naming each channel's request and response
+// types. Not imported by handlers or preload (which import directly from
+// @shared/types/serial) but serve as a clear contract reference.
+// ---------------------------------------------------------------------------
+
+/** Request payload for the serial:open invoke channel. */
+export type SerialOpenRequest = ISerialOpenRequest
+
+/** Response payload for the serial:open invoke channel. */
+export type SerialOpenResult = ISerialResult
+
+/** Request payload for the serial:close invoke channel. */
+export type SerialCloseRequest = ISerialCloseRequest
+
+/** Response payload for the serial:close invoke channel. */
+export type SerialCloseResult = ISerialResult
+
+/** Request payload for the serial:write invoke channel. */
+export type SerialWriteRequest = ISerialWriteRequest
+
+/** Response payload for the serial:write invoke channel. */
+export type SerialWriteResult = ISerialResult
+
+/** Payload pushed on the serial:data channel. */
+export type SerialDataPayload = ISerialDataPayload
+
+/** Payload pushed on the serial:statusChanged channel. */
+export type SerialStatusChangedPayload = ISerialStatusPayload

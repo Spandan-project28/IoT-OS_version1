@@ -4,6 +4,15 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 
 ## Phase 4: Serial Monitor
 
+### Slice 15
+
+- Created `src/main/ipc/serialIpcHandlers.ts` — registers `serial:open`, `serial:close`, `serial:write` invoke handlers and subscribes to `SerialEventBus` to push `serial:data` and `serial:statusChanged` to the Renderer via `webContents.send()`. Push is guarded against destroyed windows.
+- Extended `src/shared/types/ipc.ts` with `SerialIpcChannels` constant and documentation-only serial payload type aliases, following the identical pattern of `HardwareIpcChannels` and `UploadIpcChannels`.
+- Extended `src/preload/index.ts` with `serialApi` exposing `open()`, `close()`, `write()`, `onData()`, `onStatusChanged()` on `window.api.serial`. Callback methods return unsubscribe functions matching the hardware API pattern.
+- Extended `src/preload/index.d.ts` with `ISerialApi` interface and added `serial: ISerialApi` to `IApi`.
+- Updated `src/main/index.ts` to register `serialIpcHandlers` at startup with the window reference, on macOS re-creation, and to call `serialIpcHandlers.remove()` (which closes all sessions) during `before-quit`.
+- No Zustand, UI, or React changes in this slice.
+
 ### Slice 14
 
 - Created `src/main/serial/` directory as the Serial Monitor backend module boundary.
