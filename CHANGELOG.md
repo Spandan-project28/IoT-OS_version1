@@ -4,6 +4,17 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 
 ## Phase 4: Serial Monitor
 
+### Slice 14
+
+- Created `src/main/serial/` directory as the Serial Monitor backend module boundary.
+- Implemented `SerialEventBus` — typed event bus for the serial domain, mirroring `HardwareEventBus` pattern. Emits `serial:line`, `serial:statusChanged`, and `serial:error`.
+- Defined `ISerialParser` interface — decouples `SerialSession` from `ReadlineParser` to allow future binary, JSON, or custom parsers.
+- Implemented `ReadlineSerialParser` — default parser wrapping `@serialport/parser-readline`, strips trailing `\r`, emits one line per event.
+- Implemented `createDefaultParser()` factory function for parser injection without importing the concrete class.
+- Implemented `SerialSession` — owns one active port connection, delegates to `ISerialParser`, emits typed events, handles OS-level disconnect gracefully, never throws to callers.
+- Implemented `SerialService` — singleton registry of `SerialSession` instances keyed by port path; exposes `open()`, `close()`, `write()`, `closeAll()`, `hasSession()`; all operations return typed `ISerialResult`.
+- No IPC, preload, Zustand, or UI changes in this slice.
+
 ### Slice 13
 
 - Created `src/shared/types/serial.ts` as the authoritative domain model for the Serial Monitor subsystem.
