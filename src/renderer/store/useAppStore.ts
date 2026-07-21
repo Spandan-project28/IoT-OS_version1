@@ -9,9 +9,12 @@
  *   React components MUST NOT call window.api directly.
  * - All window.api.upload.* calls are made exclusively from this store.
  *   React components MUST NOT call window.api.upload.* directly.
+ * - All window.api.serial.* calls are made exclusively from this store.
+ *   React components MUST NOT call window.api.serial.* directly.
  * - Components consume Zustand state through selectors only.
  * - The hardware slice communicates with the preload bridge through typed actions.
  * - The upload slice communicates with the preload bridge through typed actions.
+ * - The serial slice communicates with the preload bridge through typed actions.
  * - The push-event unsubscribe handle is a module-level private variable —
  *   it is not application state and must never enter the Zustand state graph.
  *
@@ -26,11 +29,23 @@
  *   uploadFirmware(firmware)            → upload compiled artifact, stores IUploadResult
  *   compileAndUploadFirmware(request)   → compile + upload in one call, stores IUploadResult
  *
+ * Serial state lifecycle:
+ *   initializeSerial()      → subscribe to serial:data + serial:statusChanged push events
+ *   disposeSerial()         → unsubscribe both push event handles
+ *   openSerial(request)     → open a port session, updates serialState per port
+ *   closeSerial(request)    → close a port session, updates serialState per port
+ *   writeSerial(request)    → write text to an active session
+ *   clearSerialLogs(port)   → clear the log buffer for a specific port only
+ *   toggleSerialAutoScroll()→ toggle the global auto-scroll preference
+ *
  * Typical usage pattern:
  *   Call initializeHardware() once at the top-level component (AppProviders).
  *   Call disposeHardware() in the corresponding cleanup.
+ *   Call initializeSerial() once at the top-level component (AppProviders).
+ *   Call disposeSerial() in the corresponding cleanup.
  *   Components read hardware state via useAppStore selectors.
  *   Components trigger uploads via useAppStore upload actions.
+ *   Components interact with serial via useAppStore serial actions.
  */
 
 import { create } from 'zustand'
@@ -41,6 +56,14 @@ import type {
   ICompileResult,
   IUploadResult
 } from '@shared/types/upload'
+import type {
+  ISerialOpenRequest,
+  ISerialCloseRequest,
+  ISerialWriteRequest,
+  ISerialSessionState,
+  ISerialDataPayload,
+  ISerialStatusPayload
+} from '@shared/types/serial'
 
 // ---------------------------------------------------------------------------
 // Phase 1 placeholder types (retained — consumed by existing UI components)
@@ -189,6 +212,57 @@ export interface AppState {
   lastUploadResult: IUploadResult | null
 
   // -------------------------------------------------------------------------
+  // Serial State (Phase 4, Slice 16)
+  //
+  // Per-port session state and per-port bounded log storage.
+  // Keyed by port path (e.g. "COM3", "/dev/ttyUSB0") to support multi-board
+  // monitoring without crosstalk between sessions.
+  //
+  // All values are serializable — no runtime handles, no Promises, no
+  // EventEmitters. Subscription handles live in module-level private variables.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Per-port session state map.
+   *
+   * Key:   OS port path (e.g. "COM3").
+   * Value: ISerialSessionState snapshot for that port's live session.
+   *
+   * Updated by the serial:statusChanged push handler and by openSerial() /
+   * closeSerial() as loading state transitions occur.
+   */
+  serialState: Record<string, ISerialSessionState>
+
+  /**
+   * Per-port log buffer.
+   *
+   * Key:   OS port path.
+   * Value: Array of parsed lines (newest at the end).
+   *
+   * Bounded to 1000 lines per port. When the buffer is full, the oldest
+   * line is discarded before the new one is appended.
+   */
+  serialLogs: Record<string, string[]>
+
+  /**
+   * When true the Serial Monitor UI scrolls to the latest line automatically
+   * as new data arrives. Toggled by toggleSerialAutoScroll().
+   */
+  serialAutoScroll: boolean
+
+  /**
+   * Human-readable error from the last failed serial operation (open / close / write).
+   * Null when no error is present or when a new operation starts.
+   */
+  serialError: string | null
+
+  /**
+   * True while an async serial operation (open / close / write) is in progress.
+   * Reset to false in the finally block of every async serial action.
+   */
+  serialLoading: boolean
+
+  // -------------------------------------------------------------------------
   // UI Actions
   // -------------------------------------------------------------------------
 
@@ -291,18 +365,100 @@ export interface AppState {
    * Never throws into React.
    */
   compileAndUploadFirmware: (request: IUploadRequest) => Promise<void>
+
+  // -------------------------------------------------------------------------
+  // Serial Actions (Phase 4, Slice 16)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Initializes the serial push subscriptions.
+   *
+   * Steps:
+   * 1. Guards against duplicate subscriptions (serialInitialized flag via module var).
+   * 2. Subscribes to window.api.serial.onData() — routes each line to the
+   *    correct per-port log buffer, enforcing the 1000-line bound.
+   * 3. Subscribes to window.api.serial.onStatusChanged() — updates the
+   *    per-port ISerialSessionState in serialState.
+   *
+   * Unsubscribe handles are stored in module-level private variables,
+   * not in the store — they are runtime resources, not application state.
+   *
+   * Safe to call multiple times — subsequent calls are no-ops.
+   */
+  initializeSerial: () => void
+
+  /**
+   * Removes both serial push subscriptions.
+   *
+   * Nulls the private unsubscribe handles.
+   * Safe to call multiple times — subsequent calls are no-ops.
+   * Does NOT reset serialState or serialLogs — session history is preserved.
+   */
+  disposeSerial: () => void
+
+  /**
+   * Opens a new serial session on the specified port.
+   *
+   * Sets serialLoading = true before the IPC call.
+   * On success, the serial:statusChanged push will update serialState.
+   * On typed IPC error, stores the message in serialError.
+   * On transport failure, captures the thrown error in serialError.
+   * Always clears serialLoading in finally.
+   */
+  openSerial: (request: ISerialOpenRequest) => Promise<void>
+
+  /**
+   * Closes the active serial session for the specified port.
+   *
+   * Same loading/error lifecycle as openSerial.
+   * On success, the serial:statusChanged push will update serialState.
+   */
+  closeSerial: (request: ISerialCloseRequest) => Promise<void>
+
+  /**
+   * Writes text to the active serial session for the specified port.
+   *
+   * Same loading/error lifecycle as openSerial.
+   * The newline terminator is applied server-side per request.newline.
+   */
+  writeSerial: (request: ISerialWriteRequest) => Promise<void>
+
+  /**
+   * Clears the log buffer for the specified port only.
+   *
+   * Does not affect other ports. Idempotent if the port has no logs.
+   */
+  clearSerialLogs: (port: string) => void
+
+  /**
+   * Toggles the global auto-scroll preference between true and false.
+   */
+  toggleSerialAutoScroll: () => void
 }
 
 // ---------------------------------------------------------------------------
-// Private module-level runtime handle
+// Private module-level runtime handles
 //
-// The unsubscribe function returned by window.api.hardware.onStateChanged().
-// This is a runtime resource, not application state — it must never enter
-// the Zustand store. Stored at module scope so initializeHardware() and
-// disposeHardware() share the same reference across calls.
+// Subscription handles returned by window.api.hardware.onStateChanged() and
+// window.api.serial.onData() / onStatusChanged().
+// These are runtime resources, not application state — they must never enter
+// the Zustand store. Stored at module scope so initialize/dispose pairs
+// share the same reference across calls.
 // ---------------------------------------------------------------------------
 
 let _hardwareUnsubscribe: (() => void) | null = null
+
+/**
+ * Unsubscribe handle for window.api.serial.onData().
+ * Null until initializeSerial() has been called.
+ */
+let _serialDataUnsubscribe: (() => void) | null = null
+
+/**
+ * Unsubscribe handle for window.api.serial.onStatusChanged().
+ * Null until initializeSerial() has been called.
+ */
+let _serialStatusUnsubscribe: (() => void) | null = null
 
 // ---------------------------------------------------------------------------
 // Store implementation
@@ -360,6 +516,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   uploadError: null,
   lastCompileResult: null,
   lastUploadResult: null,
+
+  // -------------------------------------------------------------------------
+  // Serial State initial values (Phase 4, Slice 16)
+  // -------------------------------------------------------------------------
+
+  serialState: {},
+  serialLogs: {},
+  serialAutoScroll: true,
+  serialError: null,
+  serialLoading: false,
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -501,5 +667,197 @@ export const useAppStore = create<AppState>((set, get) => ({
     } finally {
       set({ uploadLoading: false })
     }
+  },
+
+  // -------------------------------------------------------------------------
+  // Serial Actions (Phase 4, Slice 16)
+  // -------------------------------------------------------------------------
+
+  initializeSerial: () => {
+    // Guard: prevent duplicate subscriptions
+    if (_serialDataUnsubscribe !== null || _serialStatusUnsubscribe !== null) return
+
+    // Guard: preload bridge must be available
+    if (!window.api?.serial) {
+      set({ serialError: 'Serial API is not available.' })
+      return
+    }
+
+    // Subscribe to serial:data push events.
+    // Each event carries a single parsed line for a specific port.
+    // Route the line to the correct per-port log buffer, enforcing the
+    // 1000-line maximum. Entries beyond the limit are dropped from the front.
+    _serialDataUnsubscribe = window.api.serial.onData((payload: ISerialDataPayload) => {
+      set((state) => {
+        const existingLogs = state.serialLogs[payload.port] ?? []
+        const MAX_LINES = 1000
+
+        // Append the new line; if at capacity, drop the oldest entry.
+        const updatedLogs =
+          existingLogs.length >= MAX_LINES
+            ? [...existingLogs.slice(1), payload.line]
+            : [...existingLogs, payload.line]
+
+        return {
+          serialLogs: {
+            ...state.serialLogs,
+            [payload.port]: updatedLogs
+          }
+        }
+      })
+    })
+
+    // Subscribe to serial:statusChanged push events.
+    // Each event carries the port and its new lifecycle status.
+    // Only the affected port's ISerialSessionState is mutated — all other
+    // ports remain untouched.
+    _serialStatusUnsubscribe = window.api.serial.onStatusChanged(
+      (payload: ISerialStatusPayload) => {
+        set((state) => {
+          const existing = state.serialState[payload.port]
+
+          // Preserve the session's settings if they were stored on open.
+          // If the session was never opened (unexpected status from the Main
+          // process), fall back to safe defaults so the state is never invalid.
+          const updatedSession: ISerialSessionState = {
+            port: payload.port,
+            status: payload.status,
+            settings: existing?.settings ?? { baudRate: 9600, newline: 'crlf' },
+            error: payload.error
+          }
+
+          return {
+            serialState: {
+              ...state.serialState,
+              [payload.port]: updatedSession
+            }
+          }
+        })
+      }
+    )
+  },
+
+  disposeSerial: () => {
+    if (_serialDataUnsubscribe) {
+      _serialDataUnsubscribe()
+      _serialDataUnsubscribe = null
+    }
+
+    if (_serialStatusUnsubscribe) {
+      _serialStatusUnsubscribe()
+      _serialStatusUnsubscribe = null
+    }
+  },
+
+  openSerial: async (request: ISerialOpenRequest) => {
+    if (!window.api?.serial) return
+
+    set({ serialLoading: true, serialError: null })
+
+    // Optimistically record the session as 'connecting' so the UI can react
+    // immediately without waiting for the serial:statusChanged push event.
+    set((state) => ({
+      serialState: {
+        ...state.serialState,
+        [request.port]: {
+          port: request.port,
+          status: 'connecting',
+          settings: request.settings,
+          error: null
+        }
+      }
+    }))
+
+    try {
+      const result = await window.api.serial.open(request)
+
+      if (result.status === 'error') {
+        // The serial:statusChanged push will NOT arrive on failure —
+        // update the session state here to reflect the error.
+        set((state) => ({
+          serialError: result.error,
+          serialState: {
+            ...state.serialState,
+            [request.port]: {
+              port: request.port,
+              status: 'error',
+              settings: request.settings,
+              error: result.error
+            }
+          }
+        }))
+      }
+      // On success: serial:statusChanged (connected) will arrive via push
+      // and update serialState automatically.
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to open serial port.'
+      set((state) => ({
+        serialError: message,
+        serialState: {
+          ...state.serialState,
+          [request.port]: {
+            port: request.port,
+            status: 'error',
+            settings: request.settings,
+            error: message
+          }
+        }
+      }))
+    } finally {
+      set({ serialLoading: false })
+    }
+  },
+
+  closeSerial: async (request: ISerialCloseRequest) => {
+    if (!window.api?.serial) return
+
+    set({ serialLoading: true, serialError: null })
+
+    try {
+      const result = await window.api.serial.close(request)
+
+      if (result.status === 'error') {
+        set({ serialError: result.error })
+      }
+      // On success: serial:statusChanged (closed) will arrive via push
+      // and update serialState automatically.
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to close serial port.'
+      set({ serialError: message })
+    } finally {
+      set({ serialLoading: false })
+    }
+  },
+
+  writeSerial: async (request: ISerialWriteRequest) => {
+    if (!window.api?.serial) return
+
+    set({ serialLoading: true, serialError: null })
+
+    try {
+      const result = await window.api.serial.write(request)
+
+      if (result.status === 'error') {
+        set({ serialError: result.error })
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to write to serial port.'
+      set({ serialError: message })
+    } finally {
+      set({ serialLoading: false })
+    }
+  },
+
+  clearSerialLogs: (port: string) => {
+    set((state) => ({
+      serialLogs: {
+        ...state.serialLogs,
+        [port]: []
+      }
+    }))
+  },
+
+  toggleSerialAutoScroll: () => {
+    set((state) => ({ serialAutoScroll: !state.serialAutoScroll }))
   }
 }))

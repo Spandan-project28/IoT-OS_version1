@@ -4,6 +4,19 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 
 ## Phase 4: Serial Monitor
 
+### Slice 16
+
+- Extended `src/renderer/store/useAppStore.ts` with the serial Zustand slice.
+- Added serial type imports: `ISerialOpenRequest`, `ISerialCloseRequest`, `ISerialWriteRequest`, `ISerialSessionState`, `ISerialDataPayload`, `ISerialStatusPayload`.
+- Added 5 state fields to `AppState`: `serialState` (`Record<string, ISerialSessionState>`), `serialLogs` (`Record<string, string[]>`), `serialAutoScroll` (boolean, default `true`), `serialError` (`string | null`), `serialLoading` (boolean).
+- Added 2 private module-level runtime handles: `_serialDataUnsubscribe`, `_serialStatusUnsubscribe` — not stored in Zustand, following the established hardware pattern.
+- Added 7 actions: `initializeSerial`, `disposeSerial`, `openSerial`, `closeSerial`, `writeSerial`, `clearSerialLogs`, `toggleSerialAutoScroll`.
+- `initializeSerial` guards against duplicate subscription using null checks on private handles.
+- `serial:data` handler appends one line per event to the correct port's log buffer with a hard 1000-line bounded cap (oldest entry discarded when full).
+- `serial:statusChanged` handler updates only the affected port's `ISerialSessionState`, preserving existing settings via a safe fallback.
+- `openSerial` optimistically sets `status: 'connecting'` before the IPC call; errors update `serialState` directly since no push event is emitted on failure.
+- No IPC, backend, preload, or UI changes in this slice.
+
 ### Slice 15
 
 - Created `src/main/ipc/serialIpcHandlers.ts` — registers `serial:open`, `serial:close`, `serial:write` invoke handlers and subscribes to `SerialEventBus` to push `serial:data` and `serial:statusChanged` to the Renderer via `webContents.send()`. Push is guarded against destroyed windows.
