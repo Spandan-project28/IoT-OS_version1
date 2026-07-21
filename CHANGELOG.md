@@ -2,6 +2,19 @@
 
 All notable changes to the IoTOS AI prototype will be documented in this file.
 
+## Phase 4: Serial Monitor
+
+### Slice 13
+
+- Created `src/shared/types/serial.ts` as the authoritative domain model for the Serial Monitor subsystem.
+- Introduced `ISerialSettings` as a standalone configuration model (baud rate, newline mode), separated from runtime session state.
+- Introduced `ISerialSessionState` with a typed `SerialStatus` discriminant (`closed`, `connecting`, `connected`, `error`).
+- Introduced `ISerialDataPayload` carrying one parsed line per event (port-keyed for multi-board routing).
+- Introduced `ISerialStatusPayload` for push lifecycle events (connected, closed, error).
+- Introduced `ISerialResult` as a discriminated union consistent with `ICompileResult` / `IUploadResult`.
+- Introduced `SerialErrorCode` structured error codes for all serial failure categories.
+- No runtime behavior added. Zero changes to IPC, preload, Zustand, or UI.
+
 ## Phase 3: Firmware Upload
 
 ### Slice 10
