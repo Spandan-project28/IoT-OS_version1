@@ -1,10 +1,20 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { HardwareManager } from './hardware/HardwareManager'
+import { ArduinoCLIService } from './hardware/ArduinoCLIService'
+import { SerialPortService } from './hardware/SerialPortService'
+import { BoardIdentificationService } from './hardware/BoardIdentificationService'
+import { hardwareIpcHandlers } from './ipc/hardwareIpcHandlers'
+import { uploadIpcHandlers } from './ipc/uploadIpcHandlers'
+import { serialIpcHandlers } from './ipc/serialIpcHandlers'
 
-function createWindow(): void {
-  // Create the browser window.
+// ---------------------------------------------------------------------------
+// Window factory
+// ---------------------------------------------------------------------------
+
+function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 900,
     height: 670,
@@ -33,12 +43,15 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  return mainWindow
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+// ---------------------------------------------------------------------------
+// App lifecycle
+// ---------------------------------------------------------------------------
+
+app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
@@ -49,16 +62,70 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  // -------------------------------------------------------------------------
+  // Hardware subsystem bootstrap
+  //
+  // Sequence:
+  //   1. Initialize HardwareManager with concrete service implementations.
+  //   2. Create the BrowserWindow.
+  //   3. Register IPC handlers (requires the window reference for push events).
+  //   4. Start the hardware discovery lifecycle.
+  //
+  // IPC handlers are registered before start() so that no events are missed if
+  // the Renderer loads faster than the first hardware scan completes.
+  // -------------------------------------------------------------------------
 
-  createWindow()
-
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  // Step 1: Inject services into HardwareManager.
+  HardwareManager.initialize({
+    cli: ArduinoCLIService,
+    ports: SerialPortService,
+    identification: BoardIdentificationService
   })
+
+  // Step 2: Create window.
+  const mainWindow = createWindow()
+
+  // Step 3: Register IPC handlers (attach to the window so push events work).
+  hardwareIpcHandlers.register(mainWindow)
+
+  // Upload handlers have no push events — no window reference needed.
+  uploadIpcHandlers.register()
+
+  // Serial handlers have push events (serial:data, serial:statusChanged) —
+  // window reference is required.
+  serialIpcHandlers.register(mainWindow)
+
+  // Step 4: Start hardware discovery (async — does not block window display).
+  HardwareManager.start().catch((err: unknown) => {
+    console.error('[HardwareManager] Failed to start hardware discovery:', err)
+  })
+
+  // -------------------------------------------------------------------------
+  // macOS re-creation
+  // -------------------------------------------------------------------------
+  app.on('activate', function () {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const newWindow = createWindow()
+      hardwareIpcHandlers.register(newWindow)
+      serialIpcHandlers.register(newWindow)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
+
+app.on('before-quit', () => {
+  // Stop hardware discovery and remove IPC handlers before the process exits.
+  // This prevents lingering polling intervals or open handles from delaying
+  // the shutdown sequence on Windows.
+  HardwareManager.stop()
+  hardwareIpcHandlers.remove()
+  uploadIpcHandlers.remove()
+  // Close all active serial sessions and remove serial IPC handlers.
+  // serialIpcHandlers.remove() calls SerialService.closeAll() internally.
+  serialIpcHandlers.remove()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

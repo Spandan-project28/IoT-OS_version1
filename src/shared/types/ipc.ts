@@ -1,0 +1,309 @@
+/**
+ * IPC Contracts
+ *
+ * The single source of truth for every IPC channel that crosses the
+ * Main ↔ Renderer boundary.
+ *
+ * Architectural rules:
+ * - Channel names are string literals, not enums, so they can be used directly
+ *   with ipcMain.handle() and ipcRenderer.invoke() without an extra lookup.
+ * - Payload types mirror the domain types from @shared/types exactly.
+ *   No data transformation is performed at the IPC layer.
+ *
+ * Hardware channels (Phase 2, Slice 5):
+ *   hardware:getState   — Renderer → Main invoke, returns IHardwareState snapshot.
+ *   hardware:refresh    — Renderer → Main invoke, forces re-scan, returns IHardwareState.
+ *   hardware:stateChanged — Main → Renderer push, sent on every HardwareManager state change.
+ *
+ * Upload channels (Phase 3, Slice 9):
+ *   upload:compile          — Renderer → Main invoke, returns ICompileResult.
+ *   upload:upload           — Renderer → Main invoke, returns IUploadResult.
+ *   upload:compileAndUpload — Renderer → Main invoke, returns IUploadResult.
+ *
+ * Serial channels (Phase 4, Slice 15):
+ *   serial:open          — Renderer → Main invoke, opens a port, returns ISerialResult.
+ *   serial:close         — Renderer → Main invoke, closes a port, returns ISerialResult.
+ *   serial:write         — Renderer → Main invoke, writes text to a port, returns ISerialResult.
+ *   serial:data          — Main → Renderer push, delivers one parsed line per event.
+ *   serial:statusChanged — Main → Renderer push, delivers session lifecycle transitions.
+ *
+ * Usage (Main):
+ *   ipcMain.handle(HardwareIpcChannels.getState, () => HardwareManager.getState())
+ *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
+ *   ipcMain.handle(SerialIpcChannels.open, (_, req) => SerialService.open(req))
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(HardwareIpcChannels.getState)
+ *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
+ *   ipcRenderer.invoke(SerialIpcChannels.open, request)
+ *   ipcRenderer.on(SerialIpcChannels.data, handler)
+ *
+ * Usage (Renderer):
+ *   window.api.hardware.getState()
+ *   window.api.upload.compileAndUpload(request)
+ *   window.api.serial.open(request)
+ *   window.api.serial.onData(callback)
+ */
+
+import type { IHardwareState } from './hardware'
+import type { IUploadRequest, ICompiledFirmware, ICompileResult, IUploadResult } from './upload'
+import type {
+  ISerialOpenRequest,
+  ISerialCloseRequest,
+  ISerialWriteRequest,
+  ISerialDataPayload,
+  ISerialStatusPayload,
+  ISerialResult
+} from './serial'
+
+// ---------------------------------------------------------------------------
+// Hardware channels
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the hardware subsystem.
+ *
+ * Using a const object (rather than an enum) keeps the values as plain strings
+ * that TypeScript narrows correctly when passed to ipcMain.handle() and
+ * ipcRenderer.invoke() — both of which accept `string`, not `enum`.
+ */
+export const HardwareIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Returns the current IHardwareState without triggering any side effects.
+   */
+  getState: 'hardware:getState' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Forces an out-of-cycle hardware re-scan: re-queries Arduino CLI, performs
+   * an immediate SerialPort.list() poll, and re-runs board identification.
+   * Returns the updated IHardwareState after all I/O completes.
+   * Also emits hardwareStateChanged as a side effect (push to Renderer).
+   */
+  refresh: 'hardware:refresh' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent whenever HardwareManager emits a hardwareStateChanged event.
+   * Renderer subscribes via window.api.hardware.onStateChanged().
+   */
+  stateChanged: 'hardware:stateChanged' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Hardware payload types
+// ---------------------------------------------------------------------------
+
+/**
+ * The payload returned by the hardware:getState invoke channel.
+ * A point-in-time snapshot of the entire hardware layer.
+ */
+export type HardwareGetStateResult = IHardwareState
+
+/**
+ * The payload returned by the hardware:refresh invoke channel.
+ * Same shape as HardwareGetStateResult; the behavioral difference is that
+ * refresh forces real I/O before assembling the snapshot.
+ */
+export type HardwareRefreshResult = IHardwareState
+
+/**
+ * The payload pushed on the hardware:stateChanged one-way channel.
+ * Renderer receives this whenever hardware state mutates.
+ */
+export type HardwareStateChangedPayload = IHardwareState
+
+// ---------------------------------------------------------------------------
+// Upload channels
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the upload subsystem.
+ *
+ * Intentionally separate from HardwareIpcChannels — the upload domain
+ * is independent of hardware detection and must remain decoupled.
+ *
+ * All three channels are Renderer → Main invoke calls.
+ * No push events are defined in this slice (progress streaming is deferred).
+ *
+ * Usage (Main):
+ *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
+ *
+ * Usage (Renderer):
+ *   window.api.upload.compile(request)
+ *   window.api.upload.compileAndUpload(request)
+ */
+export const UploadIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Compiles firmware source and returns a compiled artifact on success.
+   * Request:  IUploadRequest
+   * Response: ICompileResult
+   */
+  compile: 'upload:compile' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Uploads a previously compiled firmware artifact to the target port.
+   * Request:  ICompiledFirmware
+   * Response: IUploadResult
+   */
+  upload: 'upload:upload' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Compiles firmware source then uploads to the target port in one call.
+   * Stops and returns the compile error if compilation fails.
+   * Request:  IUploadRequest
+   * Response: IUploadResult
+   */
+  compileAndUpload: 'upload:compileAndUpload' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Upload payload type aliases
+//
+// These are documentation-only type aliases that name each channel's request
+// and response types explicitly. They are not imported by the IPC handlers
+// or preload (which import directly from @shared/types/upload) but serve as
+// a clear contract reference for this file's readers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Request payload for the upload:compile invoke channel.
+ */
+export type UploadCompileRequest = IUploadRequest
+
+/**
+ * Response payload for the upload:compile invoke channel.
+ */
+export type UploadCompileResult = ICompileResult
+
+/**
+ * Request payload for the upload:upload invoke channel.
+ */
+export type UploadUploadRequest = ICompiledFirmware
+
+/**
+ * Response payload for the upload:upload invoke channel.
+ */
+export type UploadUploadResult = IUploadResult
+
+/**
+ * Request payload for the upload:compileAndUpload invoke channel.
+ */
+export type UploadCompileAndUploadRequest = IUploadRequest
+
+/**
+ * Response payload for the upload:compileAndUpload invoke channel.
+ */
+export type UploadCompileAndUploadResult = IUploadResult
+
+// ---------------------------------------------------------------------------
+// Serial channels
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the serial subsystem.
+ *
+ * Intentionally separate from HardwareIpcChannels and UploadIpcChannels —
+ * serial communication is an independent domain.
+ *
+ * Invoke channels (Renderer → Main, awaitable response):
+ *   serial:open   — opens a port session, returns ISerialResult.
+ *   serial:close  — closes a port session, returns ISerialResult.
+ *   serial:write  — writes text to an open session, returns ISerialResult.
+ *
+ * Push channels (Main → Renderer, one-way):
+ *   serial:data          — pushed per parsed line from a session.
+ *   serial:statusChanged — pushed on every session lifecycle transition.
+ *
+ * Usage (Main):
+ *   ipcMain.handle(SerialIpcChannels.open, (_, req) => SerialService.open(req))
+ *   mainWindow.webContents.send(SerialIpcChannels.data, payload)
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(SerialIpcChannels.open, request)
+ *   ipcRenderer.on(SerialIpcChannels.data, handler)
+ *
+ * Usage (Renderer):
+ *   window.api.serial.open(request)
+ *   window.api.serial.onData(callback)
+ */
+export const SerialIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Opens a new serial session on the specified port.
+   * Request:  ISerialOpenRequest
+   * Response: ISerialResult
+   */
+  open: 'serial:open' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Closes the active serial session for the specified port.
+   * Request:  ISerialCloseRequest
+   * Response: ISerialResult
+   */
+  close: 'serial:close' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Writes text to the active serial session for the specified port.
+   * Request:  ISerialWriteRequest
+   * Response: ISerialResult
+   */
+  write: 'serial:write' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent for every parsed line received from a serial session.
+   * One event per line — no batching in V0.1.
+   * Renderer subscribes via window.api.serial.onData().
+   */
+  data: 'serial:data' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent whenever a session transitions lifecycle state:
+   * opened (connected), closed (closed), or error (error).
+   * Renderer subscribes via window.api.serial.onStatusChanged().
+   */
+  statusChanged: 'serial:statusChanged' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Serial payload type aliases
+//
+// Documentation-only type aliases naming each channel's request and response
+// types. Not imported by handlers or preload (which import directly from
+// @shared/types/serial) but serve as a clear contract reference.
+// ---------------------------------------------------------------------------
+
+/** Request payload for the serial:open invoke channel. */
+export type SerialOpenRequest = ISerialOpenRequest
+
+/** Response payload for the serial:open invoke channel. */
+export type SerialOpenResult = ISerialResult
+
+/** Request payload for the serial:close invoke channel. */
+export type SerialCloseRequest = ISerialCloseRequest
+
+/** Response payload for the serial:close invoke channel. */
+export type SerialCloseResult = ISerialResult
+
+/** Request payload for the serial:write invoke channel. */
+export type SerialWriteRequest = ISerialWriteRequest
+
+/** Response payload for the serial:write invoke channel. */
+export type SerialWriteResult = ISerialResult
+
+/** Payload pushed on the serial:data channel. */
+export type SerialDataPayload = ISerialDataPayload
+
+/** Payload pushed on the serial:statusChanged channel. */
+export type SerialStatusChangedPayload = ISerialStatusPayload

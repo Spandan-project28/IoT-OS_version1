@@ -4,10 +4,13 @@ import { useAppStore } from '../../store/useAppStore'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { IconButton } from '../common/IconButton'
 import { Tooltip } from '../common/Tooltip'
+import { SkeletonLoader } from '../common/SkeletonLoader'
 import React from 'react'
 
 export function Sidebar(): React.JSX.Element {
-  const { sidebarCollapsed, toggleSidebar } = useAppStore()
+  const { sidebarCollapsed, toggleSidebar, hardware, hardwareLoading } = useAppStore()
+
+  const connectedBoard = hardware.connectedBoards[0] ?? null
 
   return (
     <div
@@ -79,13 +82,35 @@ export function Sidebar(): React.JSX.Element {
         ))}
       </nav>
 
+      {/* Device connection status footer */}
       <div className="p-24 border-t border-dark-border shrink-0 flex items-center justify-center">
         {sidebarCollapsed ? (
-          <div className="w-8 h-8 rounded-full bg-dark-surface border border-dark-border-strong" />
+          <Tooltip content={connectedBoard ? connectedBoard.name : 'No Device'} position="right">
+            <div
+              className={`w-8 h-8 rounded-full border ${
+                connectedBoard
+                  ? 'bg-primary border-primary shadow-glow-primary'
+                  : 'bg-dark-surface border-dark-border-strong'
+              }`}
+            />
+          </Tooltip>
+        ) : hardwareLoading && !connectedBoard ? (
+          <div className="w-full px-8 flex items-center gap-10">
+            <SkeletonLoader className="w-[10px] h-[10px] rounded-full shrink-0" />
+            <SkeletonLoader className="h-[12px] w-24 rounded" />
+          </div>
+        ) : connectedBoard ? (
+          <div className="flex flex-col gap-2 text-[12px] w-full px-8 overflow-hidden">
+            <div className="flex items-center gap-8">
+              <span className="w-[8px] h-[8px] rounded-full bg-primary shadow-glow-primary shrink-0" />
+              <span className="text-white font-medium truncate">{connectedBoard.name}</span>
+            </div>
+            <span className="text-disabled font-mono pl-16 truncate">{connectedBoard.port}</span>
+          </div>
         ) : (
           <div className="flex items-center gap-10 text-[13px] text-disabled font-mono w-full px-8">
             <span className="w-[10px] h-[10px] rounded-full bg-dark-border-strong border border-dark-bg ring-2 ring-dark-surface" />
-            Disconnected
+            No Device
           </div>
         )}
       </div>

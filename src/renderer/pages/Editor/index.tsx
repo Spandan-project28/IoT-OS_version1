@@ -4,10 +4,28 @@ import { Sparkles, Code2, Cpu, Cable, BookOpen, AlertCircle } from 'lucide-react
 import React from 'react'
 import { ScrollContainer } from '../../components/common/ScrollContainer'
 
+// ---------------------------------------------------------------------------
+// Demo firmware source — Blink sketch
+//
+// Used in V0.1 to enable the Upload button while the Monaco editor is not yet
+// wired. In a future slice this will be replaced by the live editor content.
+// ---------------------------------------------------------------------------
+const DEMO_FIRMWARE_SOURCE = `void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(1000);
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(1000);
+}
+`
+
 export function Editor(): React.JSX.Element {
   return (
     <div className="flex flex-col h-full bg-background">
-      <TopBar>
+      <TopBar firmwareSource={DEMO_FIRMWARE_SOURCE}>
         <div className="flex items-center gap-12">
           <span className="font-semibold text-white text-[14px] tracking-tight">
             (No Project Open)
