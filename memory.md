@@ -114,6 +114,18 @@ Never duplicate information from the other documentation. Record changes and rea
   - Preload remains a thin bridge
   - Renderer depends only on typed APIs
 
+### ADR-009
+
+- **Status:** Accepted
+- **Decision:** Project Templates are renderer-only static data — no IPC, no Main process service, no filesystem reads.
+- **Reason:**
+  - Templates are bundled at build time as TypeScript modules; the Renderer can import them directly.
+  - No round-trip latency, no async complexity, no IPC channel proliferation.
+  - All three template definitions fit comfortably in the renderer bundle.
+- **Consequences:**
+  - Adding a new template requires one new data file + one registry import (zero runtime changes).
+  - Community/remote templates (future) would require a new IPC channel and a dedicated fetch service — deferred to a future phase.
+
 ---
 
 # Locked Decisions
@@ -133,9 +145,9 @@ Do not revisit during V0.1:
 
 # Current Status
 
-- **Current Phase:** Phase 4: Serial Monitor (Slice 18 complete — Phase 4 DONE)
-- **Current Milestone:** M4: Stabilization & Production Readiness
-- **Overall Progress:** Phase 1 (100%), Phase 2 (100%), Phase 3 (100%), Phase 4 (100%)
+- **Current Phase:** Phase 5: Project Templates (Slice 21 complete — Phase 5 DONE)
+- **Current Milestone:** M5: Template Gallery & Editor Integration
+- **Overall Progress:** Phase 1 (100%), Phase 2 (100%), Phase 3 (100%), Phase 4 (100%), Phase 5 (100%)
 - **Last Updated:** July 25, 2026
 
 ---
@@ -166,6 +178,7 @@ Do not revisit during V0.1:
 | 2026-07-21 | Phase 4, Slice 15: Serial IPC Bridge                                                                                           | Yes       | - Created `serialIpcHandlers.ts` registering `serial:open`, `serial:close`, `serial:write` invoke handlers.<br>- Push events `serial:data` and `serial:statusChanged` forwarded to renderer via `webContents.send()` guarded against destroyed windows.<br>- Extended preload with typed `ISerialApi` matching hardware pattern exactly.                                                                                                                                  | - Push events required guarding to prevent crashes if renderer window closed mid-session.                                                                                        | - Null-check on `webContents.isDestroyed()` before every `send()` call. `serialIpcHandlers.remove()` called on `before-quit` to close all open sessions.                                                                    | Phase 4, Slice 16 (Renderer State).                                         |
 | 2026-07-21 | Phase 4, Slice 16: Serial Renderer State (Zustand)                                                                             | Yes       | - Extended `useAppStore` with 5 serial state fields and 7 serial actions.<br>- Per-port log buffers bounded at 1000 lines (oldest discarded when full).<br>- Push subscription handles stored at module scope — not in Zustand state — consistent with hardware pattern.<br>- `openSerial` sets status `connecting` optimistically before IPC call.                                                                                                                       | - Zustand state must remain fully serializable; runtime subscription handles cannot live inside the store.                                                                       | - Module-level `_serialDataUnsubscribe` / `_serialStatusUnsubscribe` variables mirror the hardware `_hardwareUnsubscribe` pattern.                                                                                          | Phase 4, Slice 17 (UI Integration).                                         |
 | 2026-07-25 | Phase 4, Slice 18: Stabilization, Architecture Audit & Production Readiness                                                    | Yes       | - Serial domain verified to follow Hardware/Upload conventions exactly (Object.freeze exports, IPC register/remove pattern, module-scope subscription handles, webContents guard, discriminated union results).<br>- Scaffold `ipcMain.on('ping')` removed — dangling listener with no cleanup.<br>- `SerialService.closeAll()` bug fixed — sessions were captured by key but looked up after `_sessions.clear()`, so all OS port handles leaked at shutdown.                   | - `closeAll()` bug was silent — no error, no warning, just leaked OS port handles. Discovered during lifecycle audit by tracing the capture-then-clear-then-lookup sequence.    | - Changed to capture `[..._sessions.values()]` before `_sessions.clear()` so each session reference is directly available for `close()` calls inside the async map.                                                         | Phase 5 (Project Templates).                                                |
+| 2026-07-25 | Phase 5, Slices 19–21: Project Templates (Types, Registry, UI)                                                                 | Yes       | - Templates are renderer-only static data — no IPC, no Main process, no async code required.<br>- `ITemplateDefinition.boards` typed as `ReadonlyArray<SupportedBoard>` because `Object.freeze` widens literal array types; `as const` was tried first but produced a readonly tuple that was not assignable to the mutable `SupportedBoard[]` field. `ReadonlyArray` is the correct solution.<br>- `DEMO_FIRMWARE_SOURCE` in Editor removed and replaced by `selectedTemplate?.firmware`.<br>- `TemplateCard` is purely presentational; Projects page owns selection and navigation. | - `Object.freeze` + `as const` produced `readonly ["arduino-uno", ...]` which TypeScript would not assign to `SupportedBoard[]`. | - Changed field type to `ReadonlyArray<SupportedBoard>` in shared types — immutable by design, semantically accurate. | Phase 6 (AI Firmware Generation).                                           |
 
 ---
 

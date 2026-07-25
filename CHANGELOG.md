@@ -2,6 +2,38 @@
 
 All notable changes to the IoTOS AI prototype will be documented in this file.
 
+## Phase 5: Project Templates
+
+### Slice 21 — Template Gallery UI & Editor Integration
+
+- Created `src/renderer/components/templates/TemplateCard.tsx` — presentational card component. Displays template name, difficulty badge (success/warning/error variant), description, supported board chips, and component count. Calls `onSelect(template)` on click. No routing, no Zustand access — pure presentation.
+- Replaced EmptyWorkspace placeholder in `src/renderer/pages/Projects/index.tsx` with the Template Gallery. Reads `templateRegistry` (static import), renders one `TemplateCard` per entry in a responsive 1/2/3-column grid. On card click: calls `selectTemplate(template)` then `navigate('/editor')`. No modal, no confirmation, direct navigation.
+- Updated `src/renderer/pages/Editor/index.tsx` to read `selectedTemplate` from Zustand.
+  - When a template is selected: `firmwareSource={selectedTemplate.firmware}` is passed to `TopBar`, activating the existing Upload button pipeline without any changes to `TopBar`, `UploadService`, or IPC.
+  - The sketch panel renders the firmware source in a monospace `<pre>` block.
+  - The Firmware Assistant panel replaces its placeholder sections with live template metadata: name/description (highlighted primary card), components checklist, wiring notes, and expected output.
+  - The `DEMO_FIRMWARE_SOURCE` constant is removed — superseded by the template system.
+  - When no template is selected, the original placeholder UI is preserved exactly.
+- No IPC changes. No preload changes. No Main process changes. No new dependencies.
+
+### Slice 20 — Template Registry & Zustand Integration
+
+- Created `src/renderer/domain/templates/data/blink.ts` — Blink LED template definition (`Object.freeze`).
+- Created `src/renderer/domain/templates/data/temperature.ts` — DHT11 Temperature Monitor template definition.
+- Created `src/renderer/domain/templates/data/relay.ts` — Relay Control template definition with active-LOW documentation and beginner safety note.
+- Created `src/renderer/domain/templates/registry.ts` — `templateRegistry: ITemplateDefinition[]` array; only export; no helpers. Future templates require one new file, one import, one array entry.
+- Extended `src/renderer/store/useAppStore.ts` with the Template Zustand slice: `selectedTemplate: ITemplateDefinition | null` (initial `null`), `selectTemplate(template)` pure set, `clearTemplate()` resets to null. Zero side effects.
+
+### Slice 19 — Shared Template Types
+
+- Created `src/shared/types/template.ts` as the authoritative domain model for the Project Templates subsystem.
+- Introduced `ITemplateDefinition` with full JSDoc on every field (id, name, description, difficulty, tags, boards, components, wiring, firmware, expectedOutput).
+- Introduced `ITemplateComponent` (name, quantity, notes).
+- Introduced `TemplateDifficulty` union: `'beginner' | 'intermediate' | 'advanced'`.
+- Introduced `SupportedBoard` union: `'arduino-uno' | 'arduino-nano' | 'esp32'`.
+- `boards` field typed as `ReadonlyArray<SupportedBoard>` — immutable by design.
+- No runtime behavior. Zero IPC, preload, Zustand, or UI changes in this slice.
+
 ## Phase 4: Serial Monitor
 
 ### Slice 18 — Stabilization, Architecture Audit & Production Readiness

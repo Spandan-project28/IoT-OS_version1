@@ -11,10 +11,13 @@
  *   React components MUST NOT call window.api.upload.* directly.
  * - All window.api.serial.* calls are made exclusively from this store.
  *   React components MUST NOT call window.api.serial.* directly.
+ * - All window.api.template.* calls are NOT required — templates are pure
+ *   static renderer-side data with no IPC involvement.
  * - Components consume Zustand state through selectors only.
  * - The hardware slice communicates with the preload bridge through typed actions.
  * - The upload slice communicates with the preload bridge through typed actions.
  * - The serial slice communicates with the preload bridge through typed actions.
+ * - The template slice is synchronous and renderer-only — no IPC, no preload.
  * - The push-event unsubscribe handle is a module-level private variable —
  *   it is not application state and must never enter the Zustand state graph.
  *
@@ -38,6 +41,10 @@
  *   clearSerialLogs(port)   → clear the log buffer for a specific port only
  *   toggleSerialAutoScroll()→ toggle the global auto-scroll preference
  *
+ * Template state lifecycle:
+ *   selectTemplate(t)  → stores the chosen ITemplateDefinition in selectedTemplate
+ *   clearTemplate()    → resets selectedTemplate to null
+ *
  * Typical usage pattern:
  *   Call initializeHardware() once at the top-level component (AppProviders).
  *   Call disposeHardware() in the corresponding cleanup.
@@ -46,6 +53,7 @@
  *   Components read hardware state via useAppStore selectors.
  *   Components trigger uploads via useAppStore upload actions.
  *   Components interact with serial via useAppStore serial actions.
+ *   Components read selectedTemplate and call selectTemplate/clearTemplate.
  */
 
 import { create } from 'zustand'
@@ -64,6 +72,7 @@ import type {
   ISerialDataPayload,
   ISerialStatusPayload
 } from '@shared/types/serial'
+import type { ITemplateDefinition } from '@shared/types/template'
 
 // ---------------------------------------------------------------------------
 // Phase 1 placeholder types (retained — consumed by existing UI components)
@@ -263,6 +272,27 @@ export interface AppState {
   serialLoading: boolean
 
   // -------------------------------------------------------------------------
+  // Template State (Phase 5, Slice 20)
+  //
+  // Pure renderer-side state. Templates are static data — no IPC, no Main
+  // process involvement, no async operations. The selected template is read
+  // by the Editor page to populate the firmware source and info panel.
+  // -------------------------------------------------------------------------
+
+  /**
+   * The template the user has chosen from the Template Gallery.
+   *
+   * Null on application startup and after clearTemplate() is called.
+   * Set to the full ITemplateDefinition by selectTemplate().
+   *
+   * The Editor page reads this to:
+   *   - Populate the firmware code panel with selectedTemplate.firmware.
+   *   - Pass firmware to the TopBar firmwareSource prop (activates Upload button).
+   *   - Display template metadata in the Firmware Assistant panel.
+   */
+  selectedTemplate: ITemplateDefinition | null
+
+  // -------------------------------------------------------------------------
   // UI Actions
   // -------------------------------------------------------------------------
 
@@ -434,6 +464,34 @@ export interface AppState {
    * Toggles the global auto-scroll preference between true and false.
    */
   toggleSerialAutoScroll: () => void
+
+  // -------------------------------------------------------------------------
+  // Template Actions (Phase 5, Slice 20)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Stores the template the user has selected from the Template Gallery.
+   *
+   * Called by the Projects page when the user clicks a TemplateCard.
+   * The Editor page reads selectedTemplate after navigation to display
+   * the template firmware and metadata.
+   *
+   * Calling this action again with a different template replaces the
+   * current selection — no intermediate reset is required.
+   *
+   * Pure synchronous action. No IPC. No side effects.
+   */
+  selectTemplate: (template: ITemplateDefinition) => void
+
+  /**
+   * Clears the active template selection, resetting selectedTemplate to null.
+   *
+   * The Editor page falls back to its empty state when selectedTemplate is null.
+   * Call this when the user explicitly starts a blank project.
+   *
+   * Pure synchronous action. No IPC. No side effects.
+   */
+  clearTemplate: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +584,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   serialAutoScroll: true,
   serialError: null,
   serialLoading: false,
+
+  // -------------------------------------------------------------------------
+  // Template State initial values (Phase 5, Slice 20)
+  // -------------------------------------------------------------------------
+
+  selectedTemplate: null,
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -859,5 +923,17 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   toggleSerialAutoScroll: () => {
     set((state) => ({ serialAutoScroll: !state.serialAutoScroll }))
+  },
+
+  // -------------------------------------------------------------------------
+  // Template Actions (Phase 5, Slice 20)
+  // -------------------------------------------------------------------------
+
+  selectTemplate: (template: ITemplateDefinition) => {
+    set({ selectedTemplate: template })
+  },
+
+  clearTemplate: () => {
+    set({ selectedTemplate: null })
   }
 }))
