@@ -7,14 +7,16 @@ interface AppProvidersProps {
 }
 
 export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
-  const { initializeHardware, disposeHardware } = useAppStore()
+  const { initializeHardware, disposeHardware, initializeSerial, disposeSerial } = useAppStore()
 
   useEffect(() => {
     initializeHardware()
+    initializeSerial()
     return () => {
       disposeHardware()
+      disposeSerial()
     }
-  }, [initializeHardware, disposeHardware])
+  }, [initializeHardware, disposeHardware, initializeSerial, disposeSerial])
 
   return <HashRouter>{children}</HashRouter>
 }

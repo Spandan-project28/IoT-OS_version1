@@ -4,7 +4,45 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 
 ## Phase 4: Serial Monitor
 
-### Slice 16
+### Slice 18 — Stabilization, Architecture Audit & Production Readiness
+
+**Bug fix (SerialService.closeAll):**
+
+- Fixed a logic error in `SerialService.closeAll()` where `_sessions.clear()` was called before the async `.map()` that read sessions back from `_sessions.get(port)`. Because the map was already cleared, every `session` lookup returned `undefined` and `session.close()` was never called. All OS serial port handles were silently leaked at app shutdown. Fixed by capturing `[..._sessions.values()]` before clearing.
+
+**Dead code removal (main/index.ts):**
+
+- Removed the leftover `ipcMain.on('ping', ...)` scaffold handler inherited from the electron-vite template. It registered an `ipcMain` listener that was never removed during `before-quit`, creating a dangling resource. Removed the now-unused `ipcMain` import from the electron destructure.
+
+**Architecture audit — findings (no code changes required):**
+
+- Serial domain follows Hardware domain conventions exactly: module-level singleton service with `Object.freeze` export, event bus with typed `ISerialEventMap`, IPC handlers with `register`/`remove` pattern, preload bridge returning unsubscribe functions, Zustand handles at module scope.
+- All IPC channel names are unique across all three domains (hardware, upload, serial) with no collisions.
+- `preload/index.d.ts` matches `preload/index.ts` exactly — every method, parameter type, and return type is consistent.
+- Push event guards (`!webContents.isDestroyed()`) are present in both `hardwareIpcHandlers.ts` and `serialIpcHandlers.ts`.
+- `SerialSession` is correctly single-use; `SerialService` creates a new instance for every `open()` call.
+- Parser lifecycle is correct: `ReadlineSerialParser.close()` removes all listeners and nulls internal references before `_closePort()` runs.
+- The `_closed` flag in `SerialSession` prevents the `close` event handler from firing again after an explicit `close()` call.
+- `closeSerial` in Zustand does not optimistically update `serialState` — correct, because the `serial:statusChanged (closed)` push event is the authoritative source of truth.
+- Bounded log buffer (1000 lines) uses `slice(1)` which is O(n) per line. This is intentional for V0.1; batching and ring-buffer optimisations are deferred to a future performance phase.
+
+**React audit — findings (no code changes required):**
+
+- `DeviceMonitor` uses `useMemo` to stabilise `currentLogs` and prevent stale dependency array in `useEffect` auto-scroll.
+- `logEndRef` uses `scrollIntoView` rather than `scrollTop` manipulation — compatible with Panel's `overflow-auto` inner div.
+- Baud rate selector is correctly disabled while `isConnected || isConnecting` to prevent mid-session reconfiguration.
+- No unnecessary re-renders identified.
+
+### Slice 17 — Serial Monitor UI Integration
+
+- Wired `src/renderer/pages/DeviceMonitor/index.tsx` entirely to the Zustand serial store. Zero direct `window.api.serial.*` calls in any React component.
+- Added `initializeSerial()` and `disposeSerial()` lifecycle calls to `src/renderer/components/common/AppProviders.tsx`.
+- Implemented Baud Rate Selector (9600–115200), Connect/Disconnect button, live Serial Console log output, Auto-scroll toggle, Clear Logs button, and message input with Send.
+- `selectedPortPath` prefers identified board's port and falls back to first detected port.
+- Added Active Session badge to the Detected Ports table per-port.
+- Unified error banner displays both `hardwareError` and `serialError`.
+- `useMemo` wraps `currentLogs` derivation to stabilise the `useEffect` auto-scroll dependency array.
+
 
 - Extended `src/renderer/store/useAppStore.ts` with the serial Zustand slice.
 - Added serial type imports: `ISerialOpenRequest`, `ISerialCloseRequest`, `ISerialWriteRequest`, `ISerialSessionState`, `ISerialDataPayload`, `ISerialStatusPayload`.

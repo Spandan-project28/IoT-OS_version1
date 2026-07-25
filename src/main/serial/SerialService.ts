@@ -142,14 +142,17 @@ async function write(
  * cleanup and must not prevent the process from shutting down.
  */
 async function closeAll(): Promise<void> {
-  const ports = [..._sessions.keys()]
+  // Capture session references BEFORE clearing the registry so that each
+  // session.close() call still has a valid reference. Clearing first and then
+  // looking up via _sessions.get() would always return undefined because the
+  // map is already empty by the time the async callbacks execute.
+  const sessions = [..._sessions.values()]
   _sessions.clear()
 
   await Promise.allSettled(
-    ports.map(async (port) => {
+    sessions.map(async (session) => {
       try {
-        const session = _sessions.get(port)
-        if (session) await session.close()
+        await session.close()
       } catch {
         // Intentionally suppressed — teardown must always complete
       }
