@@ -11,12 +11,15 @@
  *   React components MUST NOT call window.api.upload.* directly.
  * - All window.api.serial.* calls are made exclusively from this store.
  *   React components MUST NOT call window.api.serial.* directly.
+ * - All window.api.ai.* calls are made exclusively from this store.
+ *   React components MUST NOT call window.api.ai.* directly.
  * - All window.api.template.* calls are NOT required — templates are pure
  *   static renderer-side data with no IPC involvement.
  * - Components consume Zustand state through selectors only.
  * - The hardware slice communicates with the preload bridge through typed actions.
  * - The upload slice communicates with the preload bridge through typed actions.
  * - The serial slice communicates with the preload bridge through typed actions.
+ * - The AI slice communicates with the preload bridge through typed actions.
  * - The template slice is synchronous and renderer-only — no IPC, no preload.
  * - The push-event unsubscribe handle is a module-level private variable —
  *   it is not application state and must never enter the Zustand state graph.
@@ -42,8 +45,12 @@
  *   toggleSerialAutoScroll()→ toggle the global auto-scroll preference
  *
  * Template state lifecycle:
- *   selectTemplate(t)  → stores the chosen ITemplateDefinition in selectedTemplate
- *   clearTemplate()    → resets selectedTemplate to null
+ *   selectTemplate(t)  → maps ITemplateDefinition → IProjectDocument, stores in currentProject
+ *   clearProject()     → resets currentProject, selectedTemplate, and aiError to null
+ *
+ * AI state lifecycle:
+ *   generateAiProject(request) → calls window.api.ai.generate(), stores IProjectDocument
+ *                                 on success or sets aiError on failure. Never throws.
  *
  * Typical usage pattern:
  *   Call initializeHardware() once at the top-level component (AppProviders).
@@ -53,7 +60,7 @@
  *   Components read hardware state via useAppStore selectors.
  *   Components trigger uploads via useAppStore upload actions.
  *   Components interact with serial via useAppStore serial actions.
- *   Components read selectedTemplate and call selectTemplate/clearTemplate.
+ *   Components read currentProject and call generateAiProject / selectTemplate / clearProject.
  */
 
 import { create } from 'zustand'
@@ -73,6 +80,8 @@ import type {
   ISerialStatusPayload
 } from '@shared/types/serial'
 import type { ITemplateDefinition } from '@shared/types/template'
+import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
+import type { IAIGenerateRequest } from '@shared/types/ai'
 
 // ---------------------------------------------------------------------------
 // Phase 1 placeholder types (retained — consumed by existing UI components)
@@ -154,6 +163,55 @@ export interface AppState {
   uploadStatus: IUploadStatus
   aiStatus: IAIStatus
   serialStatus: ISerialStatus
+
+  // -------------------------------------------------------------------------
+  // AI / Project State (Phase 6, Slice 25)
+  //
+  // IProjectDocument is the single runtime model for all project content —
+  // whether sourced from a template or AI generation.
+  //
+  // Both selectTemplate() and generateAiProject() write to this field.
+  // The Editor page reads exclusively from this field — it never reads
+  // selectedTemplate or the Phase 1 currentProject placeholder.
+  //
+  // Immutability contract (ADR-016):
+  // - Every write atomically replaces the entire IProjectDocument instance.
+  // - No action ever mutates fields on the existing instance in-place.
+  // - clearProject() sets this to null — it does not reset individual fields.
+  // -------------------------------------------------------------------------
+
+  /**
+   * The currently active project document.
+   *
+   * The single source of truth for all project content in the Editor:
+   * - firmware source displayed in Monaco
+   * - explanation, components, wiring, expectedOutput in the assistant panel
+   * - title in the TopBar
+   * - metadata for origin badge and debug information
+   *
+   * Null on application startup and after clearProject() is called.
+   * Replaced atomically by selectTemplate() and generateAiProject().
+   */
+  currentProjectDoc: IProjectDocument | null
+
+  /**
+   * True while generateAiProject() is awaiting the IPC response from AIService.
+   *
+   * Reset to false in the finally block — guaranteed even if the preload call
+   * rejects or AIService returns an error result.
+   *
+   * Components use this to show a loading indicator and disable the Generate button.
+   */
+  aiLoading: boolean
+
+  /**
+   * Human-readable error message from the last failed generateAiProject() call.
+   *
+   * Null on startup, cleared at the start of each new generateAiProject() call,
+   * and set when AIService returns IAIResult { status: 'error' }.
+   * Also cleared by clearProject().
+   */
+  aiError: string | null
 
   // -------------------------------------------------------------------------
   // Hardware State (Phase 2, Slice 6)
@@ -291,6 +349,49 @@ export interface AppState {
    *   - Display template metadata in the Firmware Assistant panel.
    */
   selectedTemplate: ITemplateDefinition | null
+
+  // -------------------------------------------------------------------------
+  // AI Actions (Phase 6, Slice 25)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Generates firmware from a natural-language prompt.
+   *
+   * Pipeline (all executed in the Main process via IPC):
+   *   PromptBuilder → AIClient/MockAIClient → ResponseParser → ResponseValidator
+   *   → IProjectDocument
+   *
+   * Lifecycle:
+   *   1. Sets aiLoading = true and clears aiError.
+   *   2. Calls window.api.ai.generate(request).
+   *   3a. On success: stores the returned IProjectDocument in currentProjectDoc.
+   *   3b. On typed error: sets aiError to the user-facing error message.
+   *   3c. On IPC transport failure: captures the thrown error in aiError.
+   *   4. Always sets aiLoading = false in finally.
+   *
+   * Never throws into React — all error paths produce a non-null aiError string.
+   * Components never need a try/catch around this call.
+   *
+   * @param request - The generate request containing the user prompt and optional context.
+   */
+  generateAiProject: (request: IAIGenerateRequest) => Promise<void>
+
+  /**
+   * Clears the active project, resetting all project-related state to null.
+   *
+   * Resets:
+   * - currentProjectDoc → null
+   * - selectedTemplate  → null
+   * - aiError           → null
+   *
+   * Does NOT reset aiLoading — if a generation is in progress, the loading
+   * indicator should remain until the operation completes.
+   *
+   * Replaces the previous separate clearTemplate() action. Both template and
+   * AI projects are cleared together because currentProjectDoc is the single
+   * runtime source of truth for both.
+   */
+  clearProject: () => void
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -466,30 +567,31 @@ export interface AppState {
   toggleSerialAutoScroll: () => void
 
   // -------------------------------------------------------------------------
-  // Template Actions (Phase 5, Slice 20)
+  // Template Actions (Phase 5, Slice 20 — updated in Slice 25)
   // -------------------------------------------------------------------------
 
   /**
-   * Stores the template the user has selected from the Template Gallery.
+   * Selects a template and normalises it into an IProjectDocument.
    *
    * Called by the Projects page when the user clicks a TemplateCard.
-   * The Editor page reads selectedTemplate after navigation to display
-   * the template firmware and metadata.
+   * Maps ITemplateDefinition → IProjectDocument so that the Editor page can
+   * read firmware, explanation, components, wiring, and expectedOutput from
+   * a single, unified source: currentProjectDoc.
    *
-   * Calling this action again with a different template replaces the
-   * current selection — no intermediate reset is required.
+   * Also sets selectedTemplate for backward compatibility with any existing
+   * consumers that still read it directly (e.g. TopBar).
    *
    * Pure synchronous action. No IPC. No side effects.
+   *
+   * @param template - The template the user chose from the Template Gallery.
    */
   selectTemplate: (template: ITemplateDefinition) => void
 
   /**
-   * Clears the active template selection, resetting selectedTemplate to null.
+   * @deprecated Use clearProject() instead.
    *
-   * The Editor page falls back to its empty state when selectedTemplate is null.
-   * Call this when the user explicitly starts a blank project.
-   *
-   * Pure synchronous action. No IPC. No side effects.
+   * Retained for backward compatibility with existing callers that have not
+   * yet been migrated to clearProject(). Delegates directly to clearProject().
    */
   clearTemplate: () => void
 }
@@ -556,6 +658,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     baudRate: 9600,
     logs: []
   },
+
+  // -------------------------------------------------------------------------
+  // AI / Project State initial values (Phase 6, Slice 25)
+  // -------------------------------------------------------------------------
+
+  currentProjectDoc: null,
+  aiLoading: false,
+  aiError: null,
 
   // -------------------------------------------------------------------------
   // Hardware State initial values
@@ -926,14 +1036,112 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // Template Actions (Phase 5, Slice 20)
+  // AI Actions (Phase 6, Slice 25)
+  // -------------------------------------------------------------------------
+
+  generateAiProject: async (request: IAIGenerateRequest) => {
+    // Guard: preload bridge must be available
+    if (!window.api?.ai) {
+      set({ aiError: 'AI API is not available.', aiLoading: false })
+      return
+    }
+
+    // Step 1: Set loading state and clear the previous error.
+    // Matches the async lifecycle used by compileFirmware, uploadFirmware,
+    // openSerial, etc.
+    set({ aiLoading: true, aiError: null })
+
+    try {
+      // Step 2: Delegate to the preload bridge — AIService runs the full
+      // pipeline in the Main process (PromptBuilder → AIClient → ResponseParser
+      // → ResponseValidator → IProjectDocument).
+      const result = await window.api.ai.generate(request)
+
+      if (result.status === 'success') {
+        // Step 3a: Store the returned document as the active project.
+        // Atomic replacement — never mutates the previous instance (ADR-016).
+        set({
+          currentProjectDoc: result.project,
+          // Clear the legacy Phase 1 currentProject placeholder for consistency.
+          // The Editor page should read currentProjectDoc, not currentProject.
+          selectedTemplate: null
+        })
+      } else {
+        // Step 3b: Surface the typed error. The code field allows the UI to
+        // branch on error category without parsing the error string.
+        set({ aiError: result.error })
+      }
+    } catch (err: unknown) {
+      // Step 3c: IPC transport failure — AIService itself never throws, but
+      // the preload bridge can fail if the Main process is unavailable.
+      const message = err instanceof Error ? err.message : 'AI generation failed unexpectedly.'
+      set({ aiError: message })
+    } finally {
+      // Step 4: Always restore the loading flag, regardless of outcome.
+      set({ aiLoading: false })
+    }
+  },
+
+  clearProject: () => {
+    // Resets all project-related state atomically.
+    // currentProjectDoc, selectedTemplate, and aiError are cleared together
+    // because they all describe the same concept: the currently active project.
+    //
+    // aiLoading is intentionally NOT reset here — if a generation is in progress,
+    // the loading indicator must remain until the operation's finally block fires.
+    set({
+      currentProjectDoc: null,
+      selectedTemplate: null,
+      aiError: null
+    })
+  },
+
+  // -------------------------------------------------------------------------
+  // Template Actions (Phase 5, Slice 20 — updated in Slice 25)
   // -------------------------------------------------------------------------
 
   selectTemplate: (template: ITemplateDefinition) => {
-    set({ selectedTemplate: template })
+    // Map ITemplateDefinition → IProjectDocument so the Editor reads from
+    // a single unified source (currentProjectDoc) regardless of project origin.
+    //
+    // ADR-016: all fields are set at construction time; no in-place mutation.
+    const metadata: IProjectMetadata = {
+      origin: 'template',
+      createdAt: new Date().toISOString()
+      // generator, provider, model are intentionally absent — they are only
+      // meaningful for AI-generated projects.
+    }
+
+    const projectDoc: IProjectDocument = {
+      schemaVersion: 1,
+      title: template.name,
+      description: template.description,
+      firmware: template.firmware,
+      explanation: template.description,
+      components: template.components,
+      wiring: template.wiring,
+      expectedOutput: template.expectedOutput,
+      // Use the first supported board as the board hint, or null if none declared.
+      boardHint: template.boards.length > 0 ? template.boards[0] : null,
+      metadata
+    }
+
+    set({
+      currentProjectDoc: projectDoc,
+      selectedTemplate: template,
+      // Clear any stale AI error from a previous generation attempt.
+      aiError: null
+    })
   },
 
   clearTemplate: () => {
-    set({ selectedTemplate: null })
+    // Deprecated: delegates to clearProject() for backward compatibility.
+    // Existing callers that have not yet been migrated to clearProject() will
+    // continue to work correctly.
+    set({
+      currentProjectDoc: null,
+      selectedTemplate: null,
+      aiError: null
+    })
   }
 }))
