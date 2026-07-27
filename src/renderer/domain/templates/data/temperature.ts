@@ -34,12 +34,14 @@ export const temperatureTemplate: ITemplateDefinition = Object.freeze({
     {
       name: 'Jumper Wires',
       quantity: 3,
-      notes: 'Male-to-male or male-to-female depending on whether you are using a module or breadboard.'
+      notes:
+        'Male-to-male or male-to-female depending on whether you are using a module or breadboard.'
     },
     {
       name: '10kΩ Pull-up Resistor',
       quantity: 1,
-      notes: 'Required only if using the bare 4-pin DHT11 component. Not needed with a pre-built module.'
+      notes:
+        'Required only if using the bare 4-pin DHT11 component. Not needed with a pre-built module.'
     }
   ],
 

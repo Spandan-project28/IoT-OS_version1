@@ -2,6 +2,15 @@
 
 All notable changes to the IoTOS AI prototype will be documented in this file.
 
+## Phase 6: AI Firmware Generation
+
+### Slice 22 — Shared AI Domain Types
+
+- Created `src/shared/types/project.ts` — canonical immutable `IProjectDocument` runtime model with metadata (`origin`, `createdAt`, `generator`, `provider`, `model`), `schemaVersion: 1 as const` literal, firmware, assistant explanation, components, wiring, and target board hint per ADR-010, ADR-013, and ADR-016.
+- Created `src/shared/types/ai.ts` — AI domain contracts: `IAIGenerateRequest` (with optional `context?` for future operations), `IAIProviderConfig` (Main process config for timeout, temperature, maxTokens), `IAIRawResponse` (internal LLM JSON output schema), `AIErrorCode` (9-code union for error branching), and `IAIResult` discriminated union.
+- Updated `src/shared/types/ipc.ts` — added `AiIpcChannels` constant (`ai:generate`) and `AiGenerateRequest`/`AiGenerateResult` payload documentation aliases matching `UploadIpcChannels` and `SerialIpcChannels` conventions.
+- Zero runtime logic, zero IPC handlers, zero Preload, zero Zustand, zero UI changes in this slice.
+
 ## Phase 5: Project Templates
 
 ### Slice 21 — Template Gallery UI & Editor Integration
@@ -74,7 +83,6 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 - Added Active Session badge to the Detected Ports table per-port.
 - Unified error banner displays both `hardwareError` and `serialError`.
 - `useMemo` wraps `currentLogs` derivation to stabilise the `useEffect` auto-scroll dependency array.
-
 
 - Extended `src/renderer/store/useAppStore.ts` with the serial Zustand slice.
 - Added serial type imports: `ISerialOpenRequest`, `ISerialCloseRequest`, `ISerialWriteRequest`, `ISerialSessionState`, `ISerialDataPayload`, `ISerialStatusPayload`.
