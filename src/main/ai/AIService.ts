@@ -176,22 +176,19 @@ function mapToProjectDocument(
  */
 async function generate(request: IAIGenerateRequest): Promise<IAIResult> {
   try {
-    // Step 1: Resolve provider configuration
+    // Step 1: Resolve provider configuration.
+    // effectiveMock is true when:
+    //   - AI_API_KEY is absent or empty (no real provider configured), OR
+    //   - AI_PROVIDER is explicitly set to 'mock' (developer override).
     const config = resolveProviderConfig()
-    const usingMock = config === null || process.env[ENV_PROVIDER] === 'mock'
-
-    if (usingMock && config !== null && process.env[ENV_PROVIDER] !== 'mock') {
-      // Config is present but provider override to mock is not set — use real client
-      // This branch is unreachable in V0.1 but documents the logic explicitly.
-    }
-
-    // If config is null (no API key), always use mock
-    const effectiveMock = config === null
+    const effectiveMock = config === null || process.env[ENV_PROVIDER] === 'mock'
 
     // Step 2: Build prompt
     const prompt = PromptBuilder.buildGenerate(request)
 
-    // Step 3: Call the appropriate client
+    // Step 3: Call the appropriate client.
+    // MockAIClient requires a valid IAIProviderConfig signature even though it
+    // ignores all fields — provide a safe placeholder when config is null.
     const clientConfig: IAIProviderConfig = config ?? {
       apiKey: '',
       apiUrl: DEFAULT_API_URL,

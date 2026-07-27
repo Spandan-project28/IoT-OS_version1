@@ -11,6 +11,51 @@ All notable changes to the IoTOS AI prototype will be documented in this file.
 - Updated `src/shared/types/ipc.ts` — added `AiIpcChannels` constant (`ai:generate`) and `AiGenerateRequest`/`AiGenerateResult` payload documentation aliases matching `UploadIpcChannels` and `SerialIpcChannels` conventions.
 - Zero runtime logic, zero IPC handlers, zero Preload, zero Zustand, zero UI changes in this slice.
 
+### Slice 23 — AI Main Process Backend
+
+- Created `src/main/ai/PromptBuilder.ts` — pure module with no network, no parsing, no side effects. Exports `PROMPT_VERSION = 1` and `buildGenerate(request)` which produces a `{ system, user }` prompt pair. Board context is tailored per `SupportedBoard` literal with board-specific technical detail (FQBN, chip, pin count, memory). System prompt embeds the exact JSON response schema so the LLM knows the required output shape.
+- Created `src/main/ai/AIClient.ts` — HTTP-only module. Calls OpenAI-compatible `/chat/completions` endpoint via native `fetch()`. Uses `AbortController` for configurable timeout (always cleared in `finally`). Maps HTTP status codes to typed `AIClientErrorCode` discriminated errors. Never transmits the API key outside the `Authorization` header. Returns `IAIClientResult` — never throws.
+- Created `src/main/ai/MockAIClient.ts` — deterministic test double for `AIClient`. Returns a valid Blink LED `IAIRawResponse` JSON string. No test-only marker fields; AIService processes it through the identical `ResponseParser → ResponseValidator` pipeline as a real provider response. Activated when `AI_API_KEY` is absent or `AI_PROVIDER=mock`.
+- Created `src/main/ai/ResponseParser.ts` — text-extraction-only module. Three extraction strategies in priority order: (1) strip markdown code fences, (2) direct `JSON.parse`, (3) first-`{`-to-last-`}` substring fallback to handle LLM preamble prose. Returns `unknown | null` — no knowledge of `IAIRawResponse`.
+- Created `src/main/ai/ResponseValidator.ts` — structural validation only. Narrows `unknown → IAIRawResponse`. Validates required string fields, components array (min 1 entry), component shape (name, positive-integer quantity, coerced nullable notes). Returns typed `IValidationResult` discriminated union.
+- Created `src/main/ai/AIService.ts` — the only orchestration layer. Pipeline: `resolveProviderConfig → PromptBuilder.buildGenerate → AIClient/MockAIClient.send → ResponseParser.parse → ResponseValidator.validate → mapToProjectDocument`. Maps `IAIRawResponse → IProjectDocument` in one place. Populates `metadata.origin`, `createdAt`, `generator`, `provider`, `model`. Never throws — every error path returns a typed `IAIResult`. Last-resort `catch` guards against unexpected pipeline failures. Provider config (apiKey) is never transmitted to the Renderer.
+
+### Slice 24 — AI IPC Bridge & Preload
+
+- Updated `src/shared/types/ipc.ts` — added `AiIpcChannels.generate = 'ai:generate'` constant following `HardwareIpcChannels`/`UploadIpcChannels`/`SerialIpcChannels` conventions exactly.
+- Created `src/main/ipc/aiIpcHandlers.ts` — registers `ipcMain.handle('ai:generate')` which delegates exclusively to `AIService.generate(request)` and returns the typed `IAIResult` to the Renderer. Performs no business logic, no validation, no mapping. Exposes `register()` and `remove()` following the established IPC handler pattern. No push events in V0.1.
+- Updated `src/main/index.ts` — calls `aiIpcHandlers.register()` at app startup and `aiIpcHandlers.remove()` during `before-quit`.
+- Updated `src/preload/index.ts` — added `aiApi` object exposing `generate(request): Promise<IAIResult>` via `ipcRenderer.invoke(AiIpcChannels.generate, request)`. Added `ai: aiApi` to the `contextBridge.exposeInMainWorld` call.
+- Updated `src/preload/index.d.ts` — added `IAiApi` interface with `generate` method and added `ai: IAiApi` to `IApi`.
+
+### Slice 25 — Zustand AI State
+
+- Extended `src/renderer/store/useAppStore.ts` with the AI Zustand slice.
+- Added `currentProjectDoc: IProjectDocument | null` (initial `null`) — the single runtime source of truth for the active project, regardless of origin (template or AI).
+- Added `aiLoading: boolean` (initial `false`) — true while `generateAiProject()` awaits the IPC response.
+- Added `aiError: string | null` (initial `null`) — the user-facing error message from the last failed generation.
+- Implemented `generateAiProject(request)` — follows the standardized async lifecycle: `set({ aiLoading: true, aiError: null })` → `try/await/catch` → `finally(set({ aiLoading: false }))`. On success sets `currentProjectDoc`; on error sets `aiError`. Never throws to callers.
+- Implemented `clearProject()` — atomically resets `currentProjectDoc`, `selectedTemplate`, and `aiError` to null. Retained `clearTemplate()` as a `@deprecated` backward-compatible shim that calls the same reset logic.
+- Updated `selectTemplate(template)` — now maps `ITemplateDefinition → IProjectDocument` before storing in state. Dual-writes `currentProjectDoc` and `selectedTemplate` for backward compatibility. Clears `aiError` so stale errors do not persist when a template is selected.
+
+### Slice 26 — Editor UI Integration
+
+- Rewrote `src/renderer/pages/Editor/index.tsx` to read exclusively from `currentProjectDoc`. All runtime reads of `selectedTemplate` removed from the Editor.
+- Added `PromptInput` sub-component: textarea for the natural-language prompt, Generate button with `Loader2` spinner during `aiLoading`, Ctrl+Enter keyboard shortcut, and inline error banner using `aiError`.
+- Added `AssistantSectionSkeleton` sub-component: animated `pulse` placeholder card shown while `aiLoading` is true — four skeletons replace the assistant panel content during generation; eight line skeletons replace the firmware panel content.
+- Left panel (firmware viewer) renders `currentProjectDoc.firmware` in `<pre>` when a project is active, an 8-line code skeleton while `aiLoading`, or the original "No code to display" empty state.
+- Right panel (assistant) renders `currentProjectDoc` fields (title, description, components, wiring, explanation, expectedOutput) when a project is active, four `AssistantSectionSkeleton` cards while `aiLoading`, or the original placeholder cards with descriptive guidance text.
+- Origin badge derives text from `currentProjectDoc.metadata.origin`: `'ai'` → "AI Generated", `'template'` → "Template", null → "Unsaved".
+- `boardHint` derived from `hardware.connectedBoards[0]?.type`: `'esp32'` → `'esp32'`, `'arduino'` with `nano` FQBN → `'arduino-nano'`, other `'arduino'` → `'arduino-uno'`, `'unknown'` → `null`.
+- `window.api.ai` is never called from React. All AI operations flow exclusively through `useAppStore.generateAiProject()`.
+
+### Slice 27 — Production Readiness, Stabilization & Final Audit
+
+- **Bug fix (`AIService.generate`):** Removed unreachable dead code block (the `if (usingMock && config !== null && ...)` branch that only contained a comment). Consolidated mock selection into a single `effectiveMock` expression: `config === null || AI_PROVIDER === 'mock'`. This also fixes the `AI_PROVIDER=mock` developer override which previously had no effect (the old `effectiveMock = config === null` ignored the env var).
+- **Stale comment fix (`useAppStore.ts`):** Updated the `selectedTemplate` JSDoc to reflect that the Editor now reads exclusively from `currentProjectDoc` (Slice 26 migration). Added `@deprecated` tag documenting that `selectedTemplate` is a backward-compatibility field for removal in Phase 7.
+- **Documentation (`CHANGELOG.md`):** Added missing entries for Slices 23–27.
+- **Documentation (`memory.md`):** Updated Current Status to reflect Phase 6 complete. Added journal entries for Slices 23–27. Updated Technical Debt table with the `selectedTemplate`/`currentProject` compatibility layers. Added ADR-010, ADR-013, and ADR-016 to the ADR register.
+
 ## Phase 5: Project Templates
 
 ### Slice 21 — Template Gallery UI & Editor Integration
