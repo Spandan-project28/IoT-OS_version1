@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import { HardwareIpcChannels, UploadIpcChannels, SerialIpcChannels } from '@shared/types/ipc'
+import {
+  HardwareIpcChannels,
+  UploadIpcChannels,
+  SerialIpcChannels,
+  AiIpcChannels
+} from '@shared/types/ipc'
 import type { IHardwareState } from '@shared/types/hardware'
 import type {
   IUploadRequest,
@@ -16,6 +21,7 @@ import type {
   ISerialStatusPayload,
   ISerialResult
 } from '@shared/types/serial'
+import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
 
 // ---------------------------------------------------------------------------
 // Hardware API
@@ -204,16 +210,52 @@ const serialApi = {
 }
 
 // ---------------------------------------------------------------------------
+// AI API
+//
+// Exposes a minimal, typed bridge for the AI firmware generation subsystem.
+//
+// Architectural rules:
+// - Thin bridge only — no business logic.
+// - generate is an invoke/response channel (no push events in V0.1).
+// - Types flow from @shared/types/ai — no duplication.
+// - IAIProviderConfig is NEVER exposed here. The Renderer never knows which
+//   provider or model is configured — it only receives IAIResult.
+//
+// Channels:
+//   ai.generate(request) — invoke ai:generate
+//                          returns Promise<IAIResult>
+// ---------------------------------------------------------------------------
+
+const aiApi = {
+  /**
+   * Generates firmware from a natural-language prompt.
+   *
+   * Delegates to AIService.generate() via the ai:generate invoke channel.
+   * The full generation pipeline (PromptBuilder → AIClient → ResponseParser →
+   * ResponseValidator → IProjectDocument) executes in the Main process.
+   *
+   * On success: returns IAIResult { status: 'success', project: IProjectDocument }.
+   * On error:   returns IAIResult { status: 'error', code: AIErrorCode, error: string }.
+   *
+   * Never rejects — all outcomes including provider errors and validation
+   * failures are returned as typed IAIResult values.
+   */
+  generate: (request: IAIGenerateRequest): Promise<IAIResult> =>
+    ipcRenderer.invoke(AiIpcChannels.generate, request) as Promise<IAIResult>
+}
+
+// ---------------------------------------------------------------------------
 // Composed API surface
 //
-// All future subsystems (ai, project, settings) will be added here as
+// All future subsystems (project, settings) will be added here as
 // additional namespaced objects when their IPC slices are implemented.
 // ---------------------------------------------------------------------------
 
 const api = {
   hardware: hardwareApi,
   upload: uploadApi,
-  serial: serialApi
+  serial: serialApi,
+  ai: aiApi
 }
 
 // ---------------------------------------------------------------------------

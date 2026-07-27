@@ -14,6 +14,7 @@ import type {
   ISerialStatusPayload,
   ISerialResult
 } from '@shared/types/serial'
+import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
 
 /**
  * IApi
@@ -114,10 +115,33 @@ export interface ISerialApi {
   onStatusChanged: (callback: (payload: ISerialStatusPayload) => void) => () => void
 }
 
+export interface IAiApi {
+  /**
+   * Generates firmware from a natural-language prompt.
+   *
+   * Sends IAIGenerateRequest to the Main process via the ai:generate invoke channel.
+   * AIService orchestrates the full pipeline: PromptBuilder → AIClient →
+   * ResponseParser → ResponseValidator → IProjectDocument.
+   *
+   * On success: IAIResult { status: 'success', project: IProjectDocument }.
+   *   The project is a fully constructed, immutable IProjectDocument ready to be
+   *   stored in the Zustand store as currentProject.
+   *
+   * On error: IAIResult { status: 'error', code: AIErrorCode, error: string }.
+   *   The code identifies the error category for UI branching without string parsing.
+   *   The error message is user-friendly and safe to display directly.
+   *
+   * Never rejects — all outcomes are returned as typed IAIResult values.
+   * The Renderer does not need a try/catch around this call.
+   */
+  generate: (request: IAIGenerateRequest) => Promise<IAIResult>
+}
+
 export interface IApi {
   hardware: IHardwareApi
   upload: IUploadApi
   serial: ISerialApi
+  ai: IAiApi
 }
 
 declare global {
