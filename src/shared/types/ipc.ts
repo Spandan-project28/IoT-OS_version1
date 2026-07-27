@@ -27,25 +27,32 @@
  *   serial:data          — Main → Renderer push, delivers one parsed line per event.
  *   serial:statusChanged — Main → Renderer push, delivers session lifecycle transitions.
  *
+ * AI channels (Phase 6, Slice 24):
+ *   ai:generate — Renderer → Main invoke, generates firmware from a prompt, returns IAIResult.
+ *
  * Usage (Main):
  *   ipcMain.handle(HardwareIpcChannels.getState, () => HardwareManager.getState())
  *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
  *   ipcMain.handle(SerialIpcChannels.open, (_, req) => SerialService.open(req))
+ *   ipcMain.handle(AiIpcChannels.generate, (_, req) => AIService.generate(req))
  *
  * Usage (Preload):
  *   ipcRenderer.invoke(HardwareIpcChannels.getState)
  *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
  *   ipcRenderer.invoke(SerialIpcChannels.open, request)
  *   ipcRenderer.on(SerialIpcChannels.data, handler)
+ *   ipcRenderer.invoke(AiIpcChannels.generate, request)
  *
  * Usage (Renderer):
  *   window.api.hardware.getState()
  *   window.api.upload.compileAndUpload(request)
  *   window.api.serial.open(request)
  *   window.api.serial.onData(callback)
+ *   window.api.ai.generate(request)
  */
 
 import type { IHardwareState } from './hardware'
+import type { IAIGenerateRequest, IAIResult } from './ai'
 import type { IUploadRequest, ICompiledFirmware, ICompileResult, IUploadResult } from './upload'
 import type {
   ISerialOpenRequest,
@@ -307,3 +314,51 @@ export type SerialDataPayload = ISerialDataPayload
 
 /** Payload pushed on the serial:statusChanged channel. */
 export type SerialStatusChangedPayload = ISerialStatusPayload
+
+// ---------------------------------------------------------------------------
+// AI channels
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the AI firmware generation subsystem.
+ *
+ * Intentionally separate from all other channel groups — the AI domain
+ * is independent of hardware, upload, and serial.
+ *
+ * All channels are Renderer → Main invoke calls.
+ * No push events are defined in V0.1 (invoke/response pattern only).
+ * Streaming responses are deferred to a future performance phase.
+ *
+ * Usage (Main):
+ *   ipcMain.handle(AiIpcChannels.generate, (_, req) => AIService.generate(req))
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(AiIpcChannels.generate, request)
+ *
+ * Usage (Renderer):
+ *   window.api.ai.generate(request)
+ */
+export const AiIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Generates firmware from a natural-language prompt.
+   * Returns a complete IProjectDocument on success, or a structured error on failure.
+   * Request:  IAIGenerateRequest
+   * Response: IAIResult
+   */
+  generate: 'ai:generate' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// AI payload type aliases
+//
+// Documentation-only type aliases naming each channel's request and response
+// types. Not imported by handlers or preload (which import directly from
+// @shared/types/ai) but serve as a clear contract reference.
+// ---------------------------------------------------------------------------
+
+/** Request payload for the ai:generate invoke channel. */
+export type AiGenerateRequest = IAIGenerateRequest
+
+/** Response payload for the ai:generate invoke channel. */
+export type AiGenerateResult = IAIResult

@@ -30,9 +30,7 @@ import type { ITemplateDefinition, TemplateDifficulty } from '@shared/types/temp
  * Maps a TemplateDifficulty to the correct Badge variant.
  * Beginner → success (green), Intermediate → warning (amber), Advanced → error (red).
  */
-function difficultyVariant(
-  difficulty: TemplateDifficulty
-): 'success' | 'warning' | 'error' {
+function difficultyVariant(difficulty: TemplateDifficulty): 'success' | 'warning' | 'error' {
   switch (difficulty) {
     case 'beginner':
       return 'success'
@@ -93,10 +91,7 @@ export function TemplateCard({ template, onSelect }: TemplateCardProps): React.J
         <h3 className="text-[16px] font-semibold text-text-primary leading-tight">
           {template.name}
         </h3>
-        <Badge
-          variant={difficultyVariant(template.difficulty)}
-          className="shrink-0 capitalize"
-        >
+        <Badge variant={difficultyVariant(template.difficulty)} className="shrink-0 capitalize">
           {template.difficulty}
         </Badge>
       </div>

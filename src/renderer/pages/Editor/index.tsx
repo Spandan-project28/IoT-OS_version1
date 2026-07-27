@@ -24,15 +24,7 @@ import { TopBar } from '../../components/layout/TopBar'
 import { Panel } from '../../components/common/Panel'
 import { ScrollContainer } from '../../components/common/ScrollContainer'
 import { useAppStore } from '../../store/useAppStore'
-import {
-  Sparkles,
-  Code2,
-  Cpu,
-  Cable,
-  BookOpen,
-  AlertCircle,
-  CheckSquare
-} from 'lucide-react'
+import { Sparkles, Code2, Cpu, Cable, BookOpen, AlertCircle, CheckSquare } from 'lucide-react'
 import React from 'react'
 
 // ---------------------------------------------------------------------------
@@ -118,7 +110,10 @@ export function Editor(): React.JSX.Element {
         {/* ---------------------------------------------------------------- */}
         {/* Left panel — sketch / firmware viewer                             */}
         {/* ---------------------------------------------------------------- */}
-        <Panel className="flex-[2]" title={selectedTemplate ? `${selectedTemplate.name}.ino` : 'sketch.ino'}>
+        <Panel
+          className="flex-[2]"
+          title={selectedTemplate ? `${selectedTemplate.name}.ino` : 'sketch.ino'}
+        >
           {selectedTemplate ? (
             <ScrollContainer className="p-0 h-full">
               <pre className="p-24 text-[13px] font-mono text-text-primary leading-relaxed whitespace-pre-wrap break-words">
@@ -153,10 +148,7 @@ export function Editor(): React.JSX.Element {
                 </AssistantSection>
 
                 {/* Components */}
-                <AssistantSection
-                  icon={<Cpu className="w-6 h-6" />}
-                  title="Components"
-                >
+                <AssistantSection icon={<Cpu className="w-6 h-6" />} title="Components">
                   <ul className="flex flex-col gap-8">
                     {selectedTemplate.components.map((component, index) => (
                       <li key={index} className="flex items-start gap-8">
@@ -177,26 +169,17 @@ export function Editor(): React.JSX.Element {
                 </AssistantSection>
 
                 {/* Wiring */}
-                <AssistantSection
-                  icon={<Cable className="w-6 h-6" />}
-                  title="Wiring"
-                >
+                <AssistantSection icon={<Cable className="w-6 h-6" />} title="Wiring">
                   <span className="whitespace-pre-line">{selectedTemplate.wiring}</span>
                 </AssistantSection>
 
                 {/* Expected Output */}
-                <AssistantSection
-                  icon={<BookOpen className="w-6 h-6" />}
-                  title="Expected Output"
-                >
+                <AssistantSection icon={<BookOpen className="w-6 h-6" />} title="Expected Output">
                   <span className="whitespace-pre-line">{selectedTemplate.expectedOutput}</span>
                 </AssistantSection>
 
                 {/* Generated Code (placeholder — Monaco coming in future) */}
-                <AssistantSection
-                  icon={<Code2 className="w-6 h-6" />}
-                  title="Generated Code"
-                >
+                <AssistantSection icon={<Code2 className="w-6 h-6" />} title="Generated Code">
                   Template firmware loaded. Press Upload to flash this sketch to your board.
                 </AssistantSection>
               </>
@@ -212,7 +195,8 @@ export function Editor(): React.JSX.Element {
                     </div>
                     <div className="text-[14px] text-text-secondary leading-relaxed">
                       Provide a detailed description of the IoT functionality you want to build. The
-                      assistant will analyze your requirements and generate production-ready firmware.
+                      assistant will analyze your requirements and generate production-ready
+                      firmware.
                     </div>
                   </div>
                 </div>
@@ -232,7 +216,9 @@ export function Editor(): React.JSX.Element {
                 <div className="flex items-start gap-16 p-20 rounded-2xl bg-surface border border-border shadow-sm">
                   <Cpu className="w-6 h-6 text-text-secondary mt-2 shrink-0" />
                   <div>
-                    <div className="text-[15px] font-semibold text-text-primary mb-6">Components</div>
+                    <div className="text-[15px] font-semibold text-text-primary mb-6">
+                      Components
+                    </div>
                     <div className="text-[14px] text-text-secondary leading-relaxed">
                       Awaiting description...
                     </div>

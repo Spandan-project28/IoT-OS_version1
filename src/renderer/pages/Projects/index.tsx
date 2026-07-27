@@ -58,11 +58,7 @@ export function Projects(): React.JSX.Element {
           {/* ---------------------------------------------------------------- */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-20">
             {templateRegistry.map((template) => (
-              <TemplateCard
-                key={template.id}
-                template={template}
-                onSelect={handleSelectTemplate}
-              />
+              <TemplateCard key={template.id} template={template} onSelect={handleSelectTemplate} />
             ))}
           </div>
         </div>

@@ -9,6 +9,7 @@ import { BoardIdentificationService } from './hardware/BoardIdentificationServic
 import { hardwareIpcHandlers } from './ipc/hardwareIpcHandlers'
 import { uploadIpcHandlers } from './ipc/uploadIpcHandlers'
 import { serialIpcHandlers } from './ipc/serialIpcHandlers'
+import { aiIpcHandlers } from './ipc/aiIpcHandlers'
 
 // ---------------------------------------------------------------------------
 // Window factory
@@ -95,6 +96,9 @@ app.whenReady().then(async () => {
   // window reference is required.
   serialIpcHandlers.register(mainWindow)
 
+  // AI handlers are invoke/response only — no push events, no window reference needed.
+  aiIpcHandlers.register()
+
   // Step 4: Start hardware discovery (async — does not block window display).
   HardwareManager.start().catch((err: unknown) => {
     console.error('[HardwareManager] Failed to start hardware discovery:', err)
@@ -126,6 +130,8 @@ app.on('before-quit', () => {
   // Close all active serial sessions and remove serial IPC handlers.
   // serialIpcHandlers.remove() calls SerialService.closeAll() internally.
   serialIpcHandlers.remove()
+  // AI handlers have no sessions or OS resources — removal is a simple deregister.
+  aiIpcHandlers.remove()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common
