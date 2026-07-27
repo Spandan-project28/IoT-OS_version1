@@ -27,8 +27,8 @@ import { relayTemplate } from './data/relay'
  *
  * Consumed by:
  * - Projects page — renders one TemplateCard per entry
- * - Zustand store — stores the selected ITemplateDefinition in selectedTemplate
- * - Editor page   — reads selectedTemplate.firmware to populate the code panel
+ * - Zustand store — selectTemplate() maps the chosen ITemplateDefinition into currentProjectDoc
+ * - Editor page   — reads currentProjectDoc.firmware to populate the code panel
  */
 export const templateRegistry: ITemplateDefinition[] = [
   blinkTemplate,

@@ -111,7 +111,9 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const newWindow = createWindow()
       hardwareIpcHandlers.register(newWindow)
+      uploadIpcHandlers.register()
       serialIpcHandlers.register(newWindow)
+      aiIpcHandlers.register()
     }
   })
 })

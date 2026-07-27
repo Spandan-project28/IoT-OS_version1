@@ -8,9 +8,9 @@
  *
  * Consumers (V0.1):
  * - templateRegistry   (Renderer — static catalogue of ITemplateDefinition objects)
- * - useAppStore        (Renderer — selectedTemplate state and selectTemplate action)
+ * - useAppStore        (Renderer — selectTemplate() maps a template into currentProjectDoc)
  * - Projects page      (Renderer — reads the registry to render the Template Gallery)
- * - Editor page        (Renderer — reads selectedTemplate to populate firmware content)
+ * - Editor page        (Renderer — reads currentProjectDoc to populate firmware content)
  *
  * Future consumers (out of scope for V0.1):
  * - AIService          (Phase 6 — generates firmware that conforms to this shape)

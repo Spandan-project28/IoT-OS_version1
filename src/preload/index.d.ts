@@ -125,7 +125,7 @@ export interface IAiApi {
    *
    * On success: IAIResult { status: 'success', project: IProjectDocument }.
    *   The project is a fully constructed, immutable IProjectDocument ready to be
-   *   stored in the Zustand store as currentProject.
+   *   stored in the Zustand store as currentProjectDoc.
    *
    * On error: IAIResult { status: 'error', code: AIErrorCode, error: string }.
    *   The code identifies the error category for UI branching without string parsing.
