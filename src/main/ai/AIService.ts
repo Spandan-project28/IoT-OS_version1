@@ -1,30 +1,73 @@
 /**
  * AIService
  *
- * The orchestration layer for the AI Firmware Generation pipeline.
+ * The single orchestration boundary for the AI Firmware Generation pipeline.
  *
- * Architectural rules:
+ * ─────────────────────────────────────────────────────────────────────────
+ * SYSTEM ARCHITECTURE FLOW  (Renderer ↔ Main process round-trip)
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ *   Editor (React)
+ *       ↓  generateAiProject(request)      ← Zustand action
+ *   Zustand (useAppStore)
+ *       ↓  window.api.ai.generate(request) ← Preload bridge
+ *   Preload (contextBridge)
+ *       ↓  ipcRenderer.invoke('ai:generate')
+ *   IPC boundary
+ *       ↓  ipcMain.handle('ai:generate')   ← aiIpcHandlers.ts
+ *   AIService.generate(request)            ← THIS MODULE
+ *       ↓  IAIResult
+ *   IPC boundary
+ *       ↓  IPC response → Preload → Zustand
+ *   currentProjectDoc                      ← set() atomically in store
+ *       ↓
+ *   Editor (React)                         ← re-renders from currentProjectDoc
+ *
+ * AIService is the single orchestration boundary. PromptBuilder, AIClient,
+ * ResponseParser, and ResponseValidator are internal implementation details
+ * of this module — the Renderer never communicates with them directly.
+ * currentProjectDoc is the only object that crosses back into the Renderer
+ * after a successful generation.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * INTERNAL AISERVICE FLOW  (execution sequence inside generate())
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ *   IAIGenerateRequest
+ *       ↓  resolveProviderConfig()         ← reads env vars; never sent to Renderer
+ *   IAIProviderConfig | null (mock)
+ *       ↓  PromptBuilder.buildGenerate()
+ *   { system, user } prompt pair
+ *       ↓  AIClient.send() / MockAIClient.send()
+ *   IAIClientResult (raw LLM text)
+ *       ↓  ResponseParser.parse()
+ *   unknown | null
+ *       ↓  ResponseValidator.validate()
+ *   IAIRawResponse
+ *       ↓  mapToProjectDocument()          ← ONLY place this mapping occurs
+ *   IProjectDocument
+ *       ↓
+ *   IAIResult { status: 'success', project }
+ *
+ * On any failure at any step: IAIResult { status: 'error', code, error }.
+ * The outer try/catch is a last-resort guard — every step returns a typed
+ * result rather than throwing, so this guard should never fire in practice.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * Architectural rules
+ * ─────────────────────────────────────────────────────────────────────────
+ *
  * - Single responsibility: orchestrate the generation pipeline only.
- * - The ONLY module aware of the complete pipeline sequence:
- *   PromptBuilder → AIClient/MockAIClient → ResponseParser → ResponseValidator → IProjectDocument.
- * - Never communicates with the Renderer, IPC, or UI directly (that is Slice 24's job).
- * - Never throws to callers — all errors are returned as typed IAIResult values.
- * - Catches every error in the pipeline; no uncaught exceptions escape.
- * - Provider configuration is resolved from environment variables on the first call.
- *   env vars are read once and cached in module-level state.
+ * - Never communicates with the Renderer, IPC, or UI directly.
+ * - Never throws to callers — all errors are typed IAIResult values.
+ * - IAIProviderConfig (apiKey, apiUrl, model) is never transmitted to the
+ *   Renderer. The Renderer only ever receives IAIResult.
+ * - Metadata (origin, createdAt, generator, provider, model) is populated
+ *   here and is immutable once set (ADR-016).
  * - Chooses MockAIClient when AI_API_KEY is absent or AI_PROVIDER === 'mock'.
- * - Maps IAIRawResponse → IProjectDocument at the boundary; this is the ONLY
- *   place this mapping occurs.
- * - IAIProviderConfig (apiKey, apiUrl, model) is never transmitted to the Renderer.
- *   The Renderer only sees IAIResult.
- * - Metadata (origin, createdAt, generator, provider, model) is populated here
- *   and is immutable once set (ADR-016).
  *
  * Public API:
  * - generate(request) → IAIResult   (never throws)
- *
- * IPC integration: aiIpcHandlers.ts (Phase 6, Slice 24) calls generate() and
- * forwards the IAIResult to the Renderer via the ai:generate invoke channel.
  */
 
 import { PromptBuilder, PROMPT_VERSION } from './PromptBuilder'
@@ -158,20 +201,15 @@ function mapToProjectDocument(
 /**
  * Generates firmware from a natural-language prompt.
  *
- * Pipeline:
- * 1. Resolve provider config from env vars (or select MockAIClient).
- * 2. Build system + user prompt via PromptBuilder.buildGenerate().
- * 3. Call AIClient.send() or MockAIClient.send() based on config availability.
- * 4. Parse the raw response text via ResponseParser.parse().
- * 5. Validate the parsed object via ResponseValidator.validate().
- * 6. Map the validated IAIRawResponse to IProjectDocument.
- * 7. Return IAIResult { status: 'success', project }.
+ * Executes the internal AIService flow documented in the module header:
+ *   resolveProviderConfig → PromptBuilder → AIClient/MockAIClient
+ *   → ResponseParser → ResponseValidator → mapToProjectDocument → IAIResult
  *
- * On any failure at any step, return IAIResult { status: 'error', code, error }.
- * The outer try/catch is a last-resort guard — individual steps handle their
- * own errors and return typed results rather than throwing.
+ * On any failure at any step: IAIResult { status: 'error', code, error }.
+ * The outer try/catch is a last-resort guard — every step returns a typed
+ * result rather than throwing, so this guard should never fire in practice.
  *
- * @param request - The generate request from the Renderer via IPC.
+ * @param request - The IAIGenerateRequest received from the Renderer via IPC.
  * @returns IAIResult — never throws.
  */
 async function generate(request: IAIGenerateRequest): Promise<IAIResult> {
