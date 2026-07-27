@@ -25,8 +25,8 @@
  * Consumers (V0.1):
  * - AIService           (Main process — receives IAIGenerateRequest, returns IAIResult)
  * - aiIpcHandlers       (Slice 24 — serialises IAIGenerateRequest and IAIResult over IPC)
- * - Zustand store       (Slice 25 — stores IAIResult.project in currentProject)
- * - Editor page         (Slice 26 — calls generateAiFirmware, reads aiLoading / aiError)
+ * - Zustand store       (Slice 25 — stores IAIResult.project in currentProjectDoc)
+ * - Editor page         (Slice 26 — calls generateAiProject, reads aiLoading / aiError)
  *
  * Future consumers (out of scope for V0.1):
  * - ImproveService      (future — sends IAIGenerateRequest with context.currentFirmware populated)
@@ -316,7 +316,7 @@ export type AIErrorCode =
  *
  * On success:
  * - project carries the fully constructed, immutable IProjectDocument.
- * - The Zustand store replaces currentProject with project atomically.
+ * - The Zustand store replaces currentProjectDoc with project atomically.
  *
  * On error:
  * - code identifies the error category for UI branching.

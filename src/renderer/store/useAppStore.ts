@@ -45,8 +45,8 @@
  *   toggleSerialAutoScroll()→ toggle the global auto-scroll preference
  *
  * Template state lifecycle:
- *   selectTemplate(t)  → maps ITemplateDefinition → IProjectDocument, stores in currentProject
- *   clearProject()     → resets currentProject, selectedTemplate, and aiError to null
+ *   selectTemplate(t)  → maps ITemplateDefinition → IProjectDocument, stores in currentProjectDoc
+ *   clearProject()     → resets currentProjectDoc and aiError to null
  *
  * AI state lifecycle:
  *   generateAiProject(request) → calls window.api.ai.generate(), stores IProjectDocument
@@ -60,7 +60,7 @@
  *   Components read hardware state via useAppStore selectors.
  *   Components trigger uploads via useAppStore upload actions.
  *   Components interact with serial via useAppStore serial actions.
- *   Components read currentProject and call generateAiProject / selectTemplate / clearProject.
+ *   Components read currentProjectDoc and call generateAiProject / selectTemplate / clearProject.
  */
 
 import { create } from 'zustand'
@@ -82,41 +82,6 @@ import type {
 import type { ITemplateDefinition } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 import type { IAIGenerateRequest } from '@shared/types/ai'
-
-// ---------------------------------------------------------------------------
-// Phase 1 placeholder types (retained — consumed by existing UI components)
-// ---------------------------------------------------------------------------
-
-export interface IBoardStatus {
-  name: string | null
-  port: string | null
-  type: string | null
-  isConnected: boolean
-}
-
-export interface IProject {
-  name: string | null
-  path: string | null
-  code: string | null
-}
-
-export interface IUploadStatus {
-  isUploading: boolean
-  progress: number
-  error: string | null
-}
-
-export interface IAIStatus {
-  isGenerating: boolean
-  error: string | null
-}
-
-export interface ISerialStatus {
-  isConnected: boolean
-  port: string | null
-  baudRate: number
-  logs: string[]
-}
 
 // ---------------------------------------------------------------------------
 // Safe default hardware state
@@ -152,27 +117,13 @@ export interface AppState {
   currentTheme: 'dark' | 'light'
 
   // -------------------------------------------------------------------------
-  // Phase 1 Business State Placeholders
-  //
-  // Retained for existing UI consumers. These will be superseded by real
-  // implementations in later phases (Upload, Serial, AI slices).
-  // -------------------------------------------------------------------------
-
-  boardStatus: IBoardStatus
-  currentProject: IProject | null
-  uploadStatus: IUploadStatus
-  aiStatus: IAIStatus
-  serialStatus: ISerialStatus
-
-  // -------------------------------------------------------------------------
   // AI / Project State (Phase 6, Slice 25)
   //
   // IProjectDocument is the single runtime model for all project content —
   // whether sourced from a template or AI generation.
   //
   // Both selectTemplate() and generateAiProject() write to this field.
-  // The Editor page reads exclusively from this field — it never reads
-  // selectedTemplate or the Phase 1 currentProject placeholder.
+  // The Editor page reads exclusively from this field.
   //
   // Immutability contract (ADR-016):
   // - Every write atomically replaces the entire IProjectDocument instance.
@@ -246,9 +197,6 @@ export interface AppState {
   //
   // Tracks the lifecycle of compile and upload operations.
   // All values are serializable — no runtime handles, no Promises.
-  //
-  // Naming is intentionally distinct from the Phase 1 `uploadStatus`
-  // placeholder above, which is retained for existing UI consumers.
   // -------------------------------------------------------------------------
 
   /**
@@ -330,30 +278,6 @@ export interface AppState {
   serialLoading: boolean
 
   // -------------------------------------------------------------------------
-  // Template State (Phase 5, Slice 20)
-  //
-  // Pure renderer-side state. Templates are static data — no IPC, no Main
-  // process involvement, no async operations. The selected template is read
-  // by the Editor page to populate the firmware source and info panel.
-  // -------------------------------------------------------------------------
-
-  /**
-   * The template the user has chosen from the Template Gallery.
-   *
-   * Null on application startup and after clearProject() is called.
-   * Set to the full ITemplateDefinition by selectTemplate().
-   *
-   * Retained as a backward-compatibility field after the Slice 26 Editor migration.
-   * The Editor page now reads exclusively from currentProjectDoc — selectTemplate()
-   * dual-writes both currentProjectDoc and selectedTemplate so existing consumers
-   * (e.g. future TopBar refinements) continue to work without change.
-   *
-   * @deprecated Prefer reading currentProjectDoc in all new code.
-   *   selectedTemplate will be removed in Phase 7 once all consumers are migrated.
-   */
-  selectedTemplate: ITemplateDefinition | null
-
-  // -------------------------------------------------------------------------
   // AI Actions (Phase 6, Slice 25)
   // -------------------------------------------------------------------------
 
@@ -384,15 +308,10 @@ export interface AppState {
    *
    * Resets:
    * - currentProjectDoc → null
-   * - selectedTemplate  → null
    * - aiError           → null
    *
    * Does NOT reset aiLoading — if a generation is in progress, the loading
    * indicator should remain until the operation completes.
-   *
-   * Replaces the previous separate clearTemplate() action. Both template and
-   * AI projects are cleared together because currentProjectDoc is the single
-   * runtime source of truth for both.
    */
   clearProject: () => void
 
@@ -508,7 +427,8 @@ export interface AppState {
    * Initializes the serial push subscriptions.
    *
    * Steps:
-   * 1. Guards against duplicate subscriptions (serialInitialized flag via module var).
+   * 1. Guards against duplicate subscriptions (checks the module-level
+   *    _serialDataUnsubscribe / _serialStatusUnsubscribe handles).
    * 2. Subscribes to window.api.serial.onData() — routes each line to the
    *    correct per-port log buffer, enforcing the 1000-line bound.
    * 3. Subscribes to window.api.serial.onStatusChanged() — updates the
@@ -581,22 +501,11 @@ export interface AppState {
    * read firmware, explanation, components, wiring, and expectedOutput from
    * a single, unified source: currentProjectDoc.
    *
-   * Also sets selectedTemplate for backward compatibility with any existing
-   * consumers that still read it directly (e.g. TopBar).
-   *
    * Pure synchronous action. No IPC. No side effects.
    *
    * @param template - The template the user chose from the Template Gallery.
    */
   selectTemplate: (template: ITemplateDefinition) => void
-
-  /**
-   * @deprecated Use clearProject() instead.
-   *
-   * Retained for backward compatibility with existing callers that have not
-   * yet been migrated to clearProject(). Delegates directly to clearProject().
-   */
-  clearTemplate: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -636,33 +545,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentTheme: 'dark',
 
   // -------------------------------------------------------------------------
-  // Phase 1 Placeholders
-  // -------------------------------------------------------------------------
-
-  boardStatus: {
-    name: null,
-    port: null,
-    type: null,
-    isConnected: false
-  },
-  currentProject: null,
-  uploadStatus: {
-    isUploading: false,
-    progress: 0,
-    error: null
-  },
-  aiStatus: {
-    isGenerating: false,
-    error: null
-  },
-  serialStatus: {
-    isConnected: false,
-    port: null,
-    baudRate: 9600,
-    logs: []
-  },
-
-  // -------------------------------------------------------------------------
   // AI / Project State initial values (Phase 6, Slice 25)
   // -------------------------------------------------------------------------
 
@@ -697,12 +579,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   serialAutoScroll: true,
   serialError: null,
   serialLoading: false,
-
-  // -------------------------------------------------------------------------
-  // Template State initial values (Phase 5, Slice 20)
-  // -------------------------------------------------------------------------
-
-  selectedTemplate: null,
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -1063,12 +939,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (result.status === 'success') {
         // Step 3a: Store the returned document as the active project.
         // Atomic replacement — never mutates the previous instance (ADR-016).
-        set({
-          currentProjectDoc: result.project,
-          // Clear the legacy Phase 1 currentProject placeholder for consistency.
-          // The Editor page should read currentProjectDoc, not currentProject.
-          selectedTemplate: null
-        })
+        set({ currentProjectDoc: result.project })
       } else {
         // Step 3b: Surface the typed error. The code field allows the UI to
         // branch on error category without parsing the error string.
@@ -1087,14 +958,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearProject: () => {
     // Resets all project-related state atomically.
-    // currentProjectDoc, selectedTemplate, and aiError are cleared together
-    // because they all describe the same concept: the currently active project.
+    // currentProjectDoc and aiError are cleared together because they both
+    // describe the same concept: the currently active project.
     //
     // aiLoading is intentionally NOT reset here — if a generation is in progress,
     // the loading indicator must remain until the operation's finally block fires.
     set({
       currentProjectDoc: null,
-      selectedTemplate: null,
       aiError: null
     })
   },
@@ -1131,19 +1001,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({
       currentProjectDoc: projectDoc,
-      selectedTemplate: template,
       // Clear any stale AI error from a previous generation attempt.
-      aiError: null
-    })
-  },
-
-  clearTemplate: () => {
-    // Deprecated: delegates to clearProject() for backward compatibility.
-    // Existing callers that have not yet been migrated to clearProject() will
-    // continue to work correctly.
-    set({
-      currentProjectDoc: null,
-      selectedTemplate: null,
       aiError: null
     })
   }

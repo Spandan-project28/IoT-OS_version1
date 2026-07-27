@@ -10,13 +10,13 @@
  * Architectural rules (ADR-010, ADR-013, ADR-016):
  * - IProjectDocument instances are immutable runtime objects.
  * - No operation mutates an existing instance in-place.
- * - loadProjectFromTemplate() constructs a fresh IProjectDocument and replaces
- *   currentProject atomically via Zustand set().
- * - generateAiFirmware() stores the AI-generated IProjectDocument and replaces
- *   currentProject atomically.
- * - Future improveAiFirmware() requests a new IProjectDocument and replaces
- *   currentProject — it never patches fields on the existing instance.
- * - clearProject() sets currentProject = null; it does not reset individual fields.
+ * - selectTemplate() constructs a fresh IProjectDocument and replaces
+ *   currentProjectDoc atomically via Zustand set().
+ * - generateAiProject() stores the AI-generated IProjectDocument and replaces
+ *   currentProjectDoc atomically.
+ * - Future regeneration actions request a new IProjectDocument and replace
+ *   currentProjectDoc — they never patch fields on the existing instance.
+ * - clearProject() sets currentProjectDoc = null; it does not reset individual fields.
  *
  * Schema evolution strategy:
  * - schemaVersion is a literal type, not a plain number.
@@ -26,8 +26,8 @@
  *
  * Consumers (V0.1):
  * - AIService          (Main process — constructs IProjectDocument from IAIRawResponse)
- * - Zustand store      (Slice 25 — stores currentProject, replaces atomically)
- * - Editor page        (Slice 26 — reads currentProject for firmware and assistant panel)
+ * - Zustand store      (Slice 25 — stores currentProjectDoc, replaces atomically)
+ * - Editor page        (Slice 26 — reads currentProjectDoc for firmware and assistant panel)
  *
  * Future consumers (out of scope for V0.1):
  * - ProjectService     (Phase 7 — persists IProjectDocument to disk)
@@ -160,11 +160,11 @@ export interface IProjectMetadata {
  * The canonical immutable runtime model for a single IoTOS AI project.
  *
  * Produced by:
- * - loadProjectFromTemplate(): constructs from ITemplateDefinition
- * - generateAiFirmware():      constructs from IAIRawResponse via AIService
+ * - selectTemplate():     constructs from ITemplateDefinition
+ * - generateAiProject():  constructs from IAIRawResponse via AIService
  *
  * Consumed by:
- * - Zustand store:  stored as currentProject; replaced atomically on every update
+ * - Zustand store:  stored as currentProjectDoc; replaced atomically on every update
  * - Editor page:    reads firmware for Monaco, reads assistant fields for info panel
  * - Upload flow:    reads firmware as the source for UploadService
  *
@@ -172,9 +172,9 @@ export interface IProjectMetadata {
  * - All fields are marked readonly.
  * - The components array is ReadonlyArray to prevent element mutation.
  * - The metadata object is IProjectMetadata (all fields readonly).
- * - Zustand must never call Object.assign(currentProject, updates).
- * - Zustand must never assign to currentProject.someField directly.
- * - Every update replaces currentProject with a new IProjectDocument instance.
+ * - Zustand must never call Object.assign(currentProjectDoc, updates).
+ * - Zustand must never assign to currentProjectDoc.someField directly.
+ * - Every update replaces currentProjectDoc with a new IProjectDocument instance.
  *
  * Schema versioning contract (ADR-013):
  * - schemaVersion is the literal 1, not a plain number.
