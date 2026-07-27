@@ -340,13 +340,16 @@ export interface AppState {
   /**
    * The template the user has chosen from the Template Gallery.
    *
-   * Null on application startup and after clearTemplate() is called.
+   * Null on application startup and after clearProject() is called.
    * Set to the full ITemplateDefinition by selectTemplate().
    *
-   * The Editor page reads this to:
-   *   - Populate the firmware code panel with selectedTemplate.firmware.
-   *   - Pass firmware to the TopBar firmwareSource prop (activates Upload button).
-   *   - Display template metadata in the Firmware Assistant panel.
+   * Retained as a backward-compatibility field after the Slice 26 Editor migration.
+   * The Editor page now reads exclusively from currentProjectDoc — selectTemplate()
+   * dual-writes both currentProjectDoc and selectedTemplate so existing consumers
+   * (e.g. future TopBar refinements) continue to work without change.
+   *
+   * @deprecated Prefer reading currentProjectDoc in all new code.
+   *   selectedTemplate will be removed in Phase 7 once all consumers are migrated.
    */
   selectedTemplate: ITemplateDefinition | null
 
