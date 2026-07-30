@@ -79,9 +79,10 @@ const _pending: { doc: IProjectDocument | null; path: string | null } = {
  * The on-disk shape of a project.iotos file.
  *
  * Distinct from IProjectDocument:
- * - fileVersion tracks the persistence format and drives schema migration
- *   (ProjectMigrations.ts, Slice 31) — independent of IProjectDocument's
- *   own schemaVersion, which tracks the in-memory document shape.
+ * - fileVersion tracks the persistence format and would drive schema
+ *   migration if one existed — independent of IProjectDocument's own
+ *   schemaVersion, which tracks the in-memory document shape. No migration
+ *   mechanism exists yet; a non-1 fileVersion fails closed (see open()).
  * - savedAt is persistence metadata with no equivalent on IProjectDocument.
  *
  * This interface is intentionally NOT exported. The Renderer must never
@@ -232,10 +233,9 @@ async function writeFileAtomic(filePath: string, data: string): Promise<void> {
  * Reads, parses, validates, and reconstructs a project file from disk.
  *
  * fileVersion !== 1 is treated as an unsupported/unmigrated format
- * (schema_migration_failed) — ProjectMigrations.ts does not exist until
- * Slice 31, so no migration is attempted here; this produces the same
- * outcome Slice 31's scaffold describes for fileVersion 1 (passthrough)
- * and fails closed for any other version.
+ * (schema_migration_failed) — no migration mechanism exists for any
+ * fileVersion, so such files fail closed permanently until a future slice
+ * adds one.
  *
  * Never throws — every failure is returned as a typed error result.
  */

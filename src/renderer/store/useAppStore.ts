@@ -215,11 +215,17 @@ export interface AppState {
   lastSavedAt: string | null
 
   /**
-   * Human-readable error message from the last failed save/saveAs call.
+   * Human-readable error message from the last failed saveProject(),
+   * saveAsProject(), or deleteProject() call.
    *
    * Null on startup, cleared at the start of each new saveProject()/
-   * saveAsProject() call, and set when ProjectService returns a typed error.
-   * A cancelled Save As dialog is NOT an error and never sets this field.
+   * saveAsProject() call, and set when ProjectService returns a typed error
+   * from any of the three writers above. A cancelled Save As dialog is NOT
+   * an error and never sets this field.
+   *
+   * openProject() and generateAiProject() deliberately use their own
+   * separate error fields (projectOpenError, aiError) instead of this one —
+   * each operation's failure state is independent, never shared.
    */
   projectError: string | null
 
@@ -842,6 +848,25 @@ const AUTOSAVE_DEBOUNCE_MS = 3000
 let _autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
+ * Shared internal helper: clears any pending autosave debounce timer, if one
+ * is set. A no-op if none is pending.
+ *
+ * Called whenever the active project changes (openProject, selectTemplate,
+ * generateAiProject, clearProject, deleteProject) or is superseded by a
+ * manual save (saveProject, saveAsProject), so a timer scheduled against one
+ * project/state can never fire against a different, subsequently active one.
+ *
+ * Extracted (Phase 7, Slice 34) to replace six previously-duplicated inline
+ * copies of this exact logic — purely a de-duplication, no behavior change.
+ */
+function cancelPendingAutosave(): void {
+  if (_autosaveDebounceTimer !== null) {
+    clearTimeout(_autosaveDebounceTimer)
+    _autosaveDebounceTimer = null
+  }
+}
+
+/**
  * Shared internal helper: clears any pending autosave timer and schedules a
  * new one after `delayMs`. When the timer fires, it calls autosaveProject().
  *
@@ -852,10 +877,7 @@ let _autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
  * responsible for this guard.
  */
 function scheduleAutosave(delayMs: number, getStore: () => AppState): void {
-  if (_autosaveDebounceTimer !== null) {
-    clearTimeout(_autosaveDebounceTimer)
-    _autosaveDebounceTimer = null
-  }
+  cancelPendingAutosave()
   _autosaveDebounceTimer = setTimeout(() => {
     _autosaveDebounceTimer = null
     void getStore().autosaveProject()
@@ -1277,12 +1299,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (result.status === 'success') {
         // The active project is changing — cancel any pending autosave
-        // debounce (Slice 32) so it can never fire against the project
-        // being generated now.
-        if (_autosaveDebounceTimer !== null) {
-          clearTimeout(_autosaveDebounceTimer)
-          _autosaveDebounceTimer = null
-        }
+        // debounce so it can never fire against the project being
+        // generated now.
+        cancelPendingAutosave()
 
         // Step 3a: Store the returned document as the active project.
         // Atomic replacement — never mutates the previous instance (ADR-016).
@@ -1315,11 +1334,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     // the loading indicator must remain until the operation's finally block fires.
     //
     // The active project is changing — cancel any pending autosave debounce
-    // (Slice 32) so it can never fire against whatever becomes active next.
-    if (_autosaveDebounceTimer !== null) {
-      clearTimeout(_autosaveDebounceTimer)
-      _autosaveDebounceTimer = null
-    }
+    // so it can never fire against whatever becomes active next.
+    cancelPendingAutosave()
 
     set({
       currentProjectDoc: null,
@@ -1361,11 +1377,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     // The active project is changing — cancel any pending autosave debounce
-    // (Slice 32) so it can never fire against the template being loaded now.
-    if (_autosaveDebounceTimer !== null) {
-      clearTimeout(_autosaveDebounceTimer)
-      _autosaveDebounceTimer = null
-    }
+    // so it can never fire against the template being loaded now.
+    cancelPendingAutosave()
 
     set({
       currentProjectDoc: projectDoc,
@@ -1436,6 +1449,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteProject: async (filePath: string): Promise<IProjectDeleteResult> => {
+    // The active project may be about to be removed — cancel any pending
+    // autosave debounce so it can never fire mid-delete (Slice 34). Does not
+    // close the narrower window where an autosave IPC call was already in
+    // flight when delete was invoked — that residual race is accepted,
+    // consistent with the "quit during autosave" precedent (Slice 32).
+    cancelPendingAutosave()
+
     if (!filePath) return { status: 'error', code: 'unknown', error: 'No file path provided.' }
 
     if (!window.api?.project) {
@@ -1509,10 +1529,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // A successful manual save already persists the latest document —
         // any autosave debounce pending from before this save is now
         // obsolete and must not fire.
-        if (_autosaveDebounceTimer !== null) {
-          clearTimeout(_autosaveDebounceTimer)
-          _autosaveDebounceTimer = null
-        }
+        cancelPendingAutosave()
 
         set({
           currentProjectPath: result.filePath,
@@ -1555,10 +1572,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // A successful manual save already persists the latest document —
         // any autosave debounce pending from before this save is now
         // obsolete and must not fire.
-        if (_autosaveDebounceTimer !== null) {
-          clearTimeout(_autosaveDebounceTimer)
-          _autosaveDebounceTimer = null
-        }
+        cancelPendingAutosave()
 
         set({
           currentProjectPath: result.filePath,
@@ -1597,12 +1611,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (result.status === 'success') {
         // The active project is changing — cancel any pending autosave
-        // debounce (Slice 32) so it can never fire against the project
-        // being opened now.
-        if (_autosaveDebounceTimer !== null) {
-          clearTimeout(_autosaveDebounceTimer)
-          _autosaveDebounceTimer = null
-        }
+        // debounce so it can never fire against the project being
+        // opened now.
+        cancelPendingAutosave()
 
         set({
           currentProjectDoc: result.document,

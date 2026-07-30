@@ -94,8 +94,6 @@ export function DeleteConfirmModal({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, isDeleting, onCancel])
 
-
-
   if (!isOpen) return null
 
   async function handleConfirmDelete(): Promise<void> {
