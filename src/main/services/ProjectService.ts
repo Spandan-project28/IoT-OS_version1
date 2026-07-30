@@ -23,12 +23,37 @@
  *   but no file is written. It resolves a typed 'unknown' error result.
  *   The DTO-construction (document -> DTO) direction and the atomic-write
  *   mechanism are deferred to Slice 30.
+ *
+ * Slice 30 scope:
+ * - save() is fully implemented: document -> DTO construction and an atomic
+ *   write (write a <filePath>.tmp file, flush, close, then rename over the
+ *   destination).
+ * - Every successful save() call updates module-level _pendingDoc and
+ *   _pendingPath, consumed by flush() in Slice 32.
  */
 
 import * as fs from 'fs/promises'
 import type { IProjectDocument, IProjectMetadata, ProjectSchemaVersion } from '@shared/types/project'
 import type { ITemplateComponent, SupportedBoard } from '@shared/types/template'
 import type { IProjectOpenResult, IProjectSaveResult } from '@shared/types/project-persistence'
+
+// ---------------------------------------------------------------------------
+// Internal state
+//
+// The most recently saved document and the path it was saved to. Updated on
+// every successful save() call. Not read by anything in Slice 30 — consumed
+// by flush() in Slice 32 to persist final state on app quit.
+//
+// Held as a single object (rather than two module-level `let` bindings) so
+// save() can update both fields via property assignment — TypeScript's
+// noUnusedLocals does not flag a module-scope variable that is written to
+// via member access, only one reassigned directly with no reads anywhere.
+// ---------------------------------------------------------------------------
+
+const _pending: { doc: IProjectDocument | null; path: string | null } = {
+  doc: null,
+  path: null
+}
 
 // ---------------------------------------------------------------------------
 // Persistence-layer shape (Main-process-only — never exported via @shared)
@@ -124,13 +149,63 @@ function documentFromDto(dto: IProjectFileDTO): IProjectDocument {
 }
 
 /**
+ * Maps an IProjectDocument to its on-disk DTO shape at the moment of saving.
+ *
+ * This is the IProjectDocument -> DTO direction only, used by save().
+ * The reverse direction (documentFromDto, used by open()) is unchanged.
+ */
+function documentToDto(doc: IProjectDocument, savedAt: string): IProjectFileDTO {
+  return {
+    fileVersion: 1,
+    id: doc.id,
+    schemaVersion: doc.schemaVersion,
+    title: doc.title,
+    description: doc.description,
+    firmware: doc.firmware,
+    explanation: doc.explanation,
+    components: doc.components,
+    wiring: doc.wiring,
+    expectedOutput: doc.expectedOutput,
+    boardHint: doc.boardHint,
+    metadata: doc.metadata,
+    savedAt
+  }
+}
+
+/**
  * Maps a Node.js filesystem error to a ProjectErrorCode.
  */
-function errorCodeForFsError(err: unknown): 'file_not_found' | 'permission_denied' | 'unknown' {
+function errorCodeForFsError(
+  err: unknown
+): 'file_not_found' | 'permission_denied' | 'disk_full' | 'unknown' {
   const code = (err as NodeJS.ErrnoException | undefined)?.code
   if (code === 'ENOENT') return 'file_not_found'
   if (code === 'EACCES' || code === 'EPERM') return 'permission_denied'
+  if (code === 'ENOSPC') return 'disk_full'
   return 'unknown'
+}
+
+/**
+ * Writes data to filePath atomically: write to a temporary file in the same
+ * directory, flush it to disk, close the handle, then rename it over the
+ * destination. Writing the temp file in the same directory guarantees the
+ * final rename is on the same volume (required for an atomic rename on both
+ * POSIX and Windows).
+ *
+ * Throws on failure — callers are responsible for catching and mapping the
+ * error via errorCodeForFsError(), matching the pattern already used for
+ * reads in open().
+ */
+async function writeFileAtomic(filePath: string, data: string): Promise<void> {
+  const tempPath = `${filePath}.tmp`
+  const handle = await fs.open(tempPath, 'w')
+  try {
+    await handle.writeFile(data, 'utf-8')
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+  await fs.rename(tempPath, filePath)
 }
 
 // ---------------------------------------------------------------------------
@@ -188,27 +263,27 @@ async function open(filePath: string): Promise<IProjectOpenResult> {
 }
 
 /**
- * Scaffold for Slice 30. The full signature and result contract exist now
- * so nothing calling this method needs to change when Slice 30 lands, but
- * no file is written in Slice 28 — this always resolves a typed 'unknown'
- * error, matching the never-reject convention (never throws).
+ * Constructs the on-disk DTO from doc, writes it to filePath atomically
+ * (write <filePath>.tmp, flush, close, rename), and on success records doc
+ * and filePath as the pending state consumed by flush() in Slice 32.
  *
- * @param _doc      - Document to persist (accepted, ignored until Slice 30).
- * @param _filePath - Destination path (accepted, ignored until Slice 30).
+ * Never throws — every failure is returned as a typed error result, matching
+ * open()'s existing convention.
  */
-async function save(
-  // Parameters match the Slice 30 signature exactly; intentionally unused
-  // until the atomic-write implementation lands (Slice 28 scaffold).
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _doc: IProjectDocument,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _filePath: string
-): Promise<IProjectSaveResult> {
-  return {
-    status: 'error',
-    code: 'unknown',
-    error: 'ProjectService.save() is not implemented until Slice 30'
+async function save(doc: IProjectDocument, filePath: string): Promise<IProjectSaveResult> {
+  const savedAt = new Date().toISOString()
+  const dto = documentToDto(doc, savedAt)
+
+  try {
+    await writeFileAtomic(filePath, JSON.stringify(dto, null, 2))
+  } catch (err) {
+    return { status: 'error', code: errorCodeForFsError(err), error: `Failed to write ${filePath}` }
   }
+
+  _pending.doc = doc
+  _pending.path = filePath
+
+  return { status: 'success', filePath, savedAt }
 }
 
 // ---------------------------------------------------------------------------

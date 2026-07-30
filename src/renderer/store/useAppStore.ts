@@ -187,6 +187,41 @@ export interface AppState {
    */
   currentProjectPath: string | null
 
+  /**
+   * True while saveProject() or saveAsProject() is awaiting the IPC response.
+   *
+   * Reset to false in the finally block of both actions, regardless of
+   * outcome — including a cancelled Save As dialog.
+   */
+  projectSaving: boolean
+
+  /**
+   * How the active project was most recently saved.
+   *
+   * Null until the first successful save. Set to 'manual' by saveProject()
+   * and saveAsProject(); 'autosave' is written starting in Slice 32.
+   */
+  lastSaveType: 'manual' | 'autosave' | null
+
+  /**
+   * ISO 8601 timestamp of the most recent successful save.
+   *
+   * Null until the first successful save. This is the only save-timestamp
+   * state held by the store — the "Saved X ago" text shown in TopBar is
+   * computed from this value at render/interval time and is never itself
+   * stored here or persisted.
+   */
+  lastSavedAt: string | null
+
+  /**
+   * Human-readable error message from the last failed save/saveAs call.
+   *
+   * Null on startup, cleared at the start of each new saveProject()/
+   * saveAsProject() call, and set when ProjectService returns a typed error.
+   * A cancelled Save As dialog is NOT an error and never sets this field.
+   */
+  projectError: string | null
+
   // -------------------------------------------------------------------------
   // Hardware State (Phase 2, Slice 6)
   //
@@ -360,6 +395,57 @@ export interface AppState {
    * @param firmware - The complete firmware source from Monaco's onChange.
    */
   updateFirmware: (firmware: string) => void
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 30)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Saves the active project to its existing path.
+   *
+   * If currentProjectPath is null (never saved before), delegates to
+   * saveAsProject() instead — project:save is never invoked without a
+   * concrete path (ADR-P7-015).
+   *
+   * Lifecycle:
+   *   1. No-op if currentProjectDoc is null.
+   *   2. Captures the target path at invocation (stale-response guard): if
+   *      currentProjectPath has changed by the time the response arrives
+   *      (e.g. a different project became active), the response is
+   *      discarded — nothing is applied except step 5.
+   *   3. Sets projectSaving = true and clears projectError.
+   *   4. Calls window.api.project.save({ document, filePath }).
+   *   5a. On success (and not stale): currentProjectPath, projectDirty = false,
+   *       lastSaveType = 'manual', lastSavedAt, projectError = null.
+   *   5b. On error (and not stale): projectError = error.
+   *   5c. On IPC transport failure: captures the thrown error in projectError.
+   *   6. Always sets projectSaving = false in finally, regardless of staleness.
+   *
+   * Never throws into React. Components never need a try/catch around this call.
+   */
+  saveProject: () => Promise<void>
+
+  /**
+   * Saves the active project to a user-chosen location via the native
+   * Save dialog.
+   *
+   * Lifecycle:
+   *   1. No-op if currentProjectDoc is null.
+   *   2. Sets projectSaving = true and clears projectError.
+   *   3. Calls window.api.project.saveAs({ document, suggestedTitle }).
+   *   4a. On success: currentProjectPath, projectDirty = false,
+   *       lastSaveType = 'manual', lastSavedAt, projectError = null.
+   *   4b. On cancellation: no state mutation at all. The user dismissing the
+   *       native dialog is a normal action, not a failure — projectError is
+   *       never set for this outcome.
+   *   4c. On error: projectError = error.
+   *   4d. On IPC transport failure: captures the thrown error in projectError.
+   *   5. Always sets projectSaving = false in finally, including after a
+   *      cancellation.
+   *
+   * Never throws into React. Components never need a try/catch around this call.
+   */
+  saveAsProject: () => Promise<void>
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -599,6 +685,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   aiError: null,
   projectDirty: false,
   currentProjectPath: null,
+  projectSaving: false,
+  lastSaveType: null,
+  lastSavedAt: null,
+  projectError: null,
 
   // -------------------------------------------------------------------------
   // Hardware State initial values
@@ -1082,5 +1172,95 @@ export const useAppStore = create<AppState>((set, get) => ({
         projectDirty: true
       }
     })
+  },
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 30)
+  // -------------------------------------------------------------------------
+
+  saveProject: async () => {
+    const { currentProjectDoc, currentProjectPath } = get()
+    if (!currentProjectDoc) return
+
+    // ADR-P7-015: project:save is never invoked without a concrete path —
+    // redirect to the Save As flow instead.
+    if (currentProjectPath === null) {
+      await get().saveAsProject()
+      return
+    }
+
+    if (!window.api?.project) {
+      set({ projectError: 'Project API is not available.', projectSaving: false })
+      return
+    }
+
+    // Stale-response guard: capture the target path now. If a different
+    // project becomes active before the response arrives, discard the
+    // response — only projectSaving still gets reset (in finally).
+    const path = currentProjectPath
+    set({ projectSaving: true, projectError: null })
+
+    try {
+      const result = await window.api.project.save({ document: currentProjectDoc, filePath: path })
+
+      if (get().currentProjectPath !== path) return
+
+      if (result.status === 'success') {
+        set({
+          currentProjectPath: result.filePath,
+          projectDirty: false,
+          lastSaveType: 'manual',
+          lastSavedAt: result.savedAt,
+          projectError: null
+        })
+      } else {
+        set({ projectError: result.error })
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Save failed unexpectedly.'
+      if (get().currentProjectPath === path) {
+        set({ projectError: message })
+      }
+    } finally {
+      set({ projectSaving: false })
+    }
+  },
+
+  saveAsProject: async () => {
+    const { currentProjectDoc } = get()
+    if (!currentProjectDoc) return
+
+    if (!window.api?.project) {
+      set({ projectError: 'Project API is not available.', projectSaving: false })
+      return
+    }
+
+    set({ projectSaving: true, projectError: null })
+
+    try {
+      const result = await window.api.project.saveAs({
+        document: currentProjectDoc,
+        suggestedTitle: currentProjectDoc.title
+      })
+
+      if (result.status === 'success') {
+        set({
+          currentProjectPath: result.filePath,
+          projectDirty: false,
+          lastSaveType: 'manual',
+          lastSavedAt: result.savedAt,
+          projectError: null
+        })
+      } else if (result.status === 'error') {
+        set({ projectError: result.error })
+      }
+      // status === 'cancelled': no state mutation at all — a cancelled
+      // native dialog is not an error (Slice 30, Ambiguity B, resolved).
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Save failed unexpectedly.'
+      set({ projectError: message })
+    } finally {
+      set({ projectSaving: false })
+    }
   }
 }))

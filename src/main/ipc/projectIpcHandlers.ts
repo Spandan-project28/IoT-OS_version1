@@ -22,23 +22,36 @@
  *     autosave, saved — Slice 32
  *     rename, delete  — Slice 33
  *
- * mainWindow is accepted now (even though no push channel is wired yet) so
- * this function's signature does not need to change when project:saved
- * (Slice 32) is added — matches the register(mainWindow) pattern already
- * used by hardwareIpcHandlers.ts and serialIpcHandlers.ts.
+ * mainWindow is accepted now so this function's signature does not need to
+ * change when project:saved (Slice 32) is added — matches the
+ * register(mainWindow) pattern already used by hardwareIpcHandlers.ts and
+ * serialIpcHandlers.ts. Slice 30 is the first to actually use it, as the
+ * parent window for the native save dialog.
  *
  * Invoke channels handled here (Renderer → Main):
  *   workspace:info → WorkspaceService.getInfo()
+ *   project:save   → ProjectService.save() (Slice 30)
+ *   project:saveAs → dialog.showSaveDialog() + ProjectService.save() (Slice 30)
  *
  * Lifecycle:
  *   projectIpcHandlers.register(mainWindow) — called once after app is ready.
  *   projectIpcHandlers.remove()             — called on app quit or window close.
  */
 
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
+import * as fs from 'fs'
+import * as path from 'path'
 import { WorkspaceService } from '../services/WorkspaceService'
-import { WorkspaceIpcChannels } from '@shared/types/ipc'
+import { ProjectService } from '../services/ProjectService'
+import { RecentProjectsService } from '../services/RecentProjectsService'
+import { WorkspaceIpcChannels, ProjectIpcChannels } from '@shared/types/ipc'
 import type { IWorkspaceInfo } from '@shared/types/workspace'
+import type {
+  IProjectSaveRequest,
+  IProjectSaveResult,
+  IProjectSaveAsRequest,
+  IProjectSaveAsResult
+} from '@shared/types/project-persistence'
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -50,16 +63,10 @@ import type { IWorkspaceInfo } from '@shared/types/workspace'
  * Must be called after WorkspaceService.initialize() has resolved, so the
  * workspace:info handler never races an uncreated workspace directory.
  *
- * @param _mainWindow - The application's primary BrowserWindow. Accepted now
- *   (unused in Slice 28) to keep register()'s signature stable ahead of the
- *   project:saved push channel added in Slice 32, matching the
- *   register(mainWindow) pattern already used by hardwareIpcHandlers.ts and
- *   serialIpcHandlers.ts.
+ * @param mainWindow - The application's primary BrowserWindow. Used as the
+ *   parent window for the native Save As dialog.
  */
-function registerProjectIpcHandlers(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _mainWindow: BrowserWindow
-): void {
+function registerProjectIpcHandlers(mainWindow: BrowserWindow): void {
   // -------------------------------------------------------------------------
   // Invoke: workspace:info
   //
@@ -70,6 +77,77 @@ function registerProjectIpcHandlers(
   ipcMain.handle(WorkspaceIpcChannels.getInfo, (): IWorkspaceInfo => {
     return WorkspaceService.getInfo()
   })
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:save
+  //
+  // Writes the given document to an already-known path (Ctrl+S on a
+  // previously saved project). No dialog, no directory creation — the
+  // directory is guaranteed to already exist from the save that produced
+  // this path. On success, records the project in the recents registry.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(
+    ProjectIpcChannels.save,
+    async (_event, request: IProjectSaveRequest): Promise<IProjectSaveResult> => {
+      const result = await ProjectService.save(request.document, request.filePath)
+
+      if (result.status === 'success') {
+        RecentProjectsService.push(
+          result.filePath,
+          request.document.title,
+          request.document.metadata.origin,
+          result.savedAt
+        )
+      }
+
+      return result
+    }
+  )
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:saveAs
+  //
+  // Shows the native Save dialog, defaulting into a fresh workspace
+  // subdirectory named from the document's title. Creates that directory
+  // before writing (ProjectService never creates directories itself). If
+  // the user cancels the dialog, returns { status: 'cancelled' } directly
+  // without calling ProjectService.save() — cancellation is not an error
+  // (Slice 30, Ambiguity B). On success, records the project in the
+  // recents registry.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(
+    ProjectIpcChannels.saveAs,
+    async (_event, request: IProjectSaveAsRequest): Promise<IProjectSaveAsResult> => {
+      const defaultPath = path.join(
+        WorkspaceService.getDefaultProjectDir(request.suggestedTitle),
+        'project.iotos'
+      )
+
+      const dialogResult = await dialog.showSaveDialog(mainWindow, {
+        defaultPath,
+        filters: [{ name: 'IoTOS Project', extensions: ['iotos'] }]
+      })
+
+      if (dialogResult.canceled || !dialogResult.filePath) {
+        return { status: 'cancelled' }
+      }
+
+      fs.mkdirSync(path.dirname(dialogResult.filePath), { recursive: true })
+
+      const result = await ProjectService.save(request.document, dialogResult.filePath)
+
+      if (result.status === 'success') {
+        RecentProjectsService.push(
+          result.filePath,
+          request.document.title,
+          request.document.metadata.origin,
+          result.savedAt
+        )
+      }
+
+      return result
+    }
+  )
 }
 
 /**
@@ -81,6 +159,8 @@ function registerProjectIpcHandlers(
  */
 function removeProjectIpcHandlers(): void {
   ipcMain.removeHandler(WorkspaceIpcChannels.getInfo)
+  ipcMain.removeHandler(ProjectIpcChannels.save)
+  ipcMain.removeHandler(ProjectIpcChannels.saveAs)
 }
 
 // ---------------------------------------------------------------------------

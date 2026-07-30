@@ -3,6 +3,7 @@ import {
   Search,
   Play,
   Upload,
+  Save,
   Sparkles,
   Settings as SettingsIcon,
   ChevronRight,
@@ -42,10 +43,52 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
     uploadError,
     lastUploadResult,
     compileAndUploadFirmware,
-    projectDirty
+    projectDirty,
+    currentProjectDoc,
+    projectSaving,
+    lastSavedAt,
+    saveProject
   } = useAppStore()
 
   const connectedBoard = hardware.connectedBoards[0] ?? null
+
+  // ---------------------------------------------------------------------------
+  // Save eligibility guard
+  //
+  // Save is actionable only when a project is active and no save is already
+  // in flight. saveProject() itself decides save-vs-save-as based on
+  // currentProjectPath — TopBar does not need to know which one will run.
+  // ---------------------------------------------------------------------------
+  const canSave = !!currentProjectDoc && !projectSaving
+
+  function handleSave(): void {
+    if (!canSave) return
+    void saveProject()
+  }
+
+  // ---------------------------------------------------------------------------
+  // "Saved X ago" label
+  //
+  // Computed from lastSavedAt — never stored. Date.now() is only ever called
+  // inside the effect below (not during render, per React's purity rules);
+  // `now` is refreshed every 10s so the label keeps advancing without any
+  // additional store writes.
+  // ---------------------------------------------------------------------------
+  const [now, setNow] = React.useState<number>(() => Date.now())
+  React.useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 10_000)
+    return () => clearInterval(interval)
+  }, [])
+
+  function formatSavedAgo(savedAt: string, nowMs: number): string {
+    const diffSec = Math.max(0, Math.floor((nowMs - new Date(savedAt).getTime()) / 1000))
+    if (diffSec < 10) return 'Saved just now'
+    if (diffSec < 60) return `Saved ${diffSec}s ago`
+    const diffMin = Math.floor(diffSec / 60)
+    if (diffMin < 60) return `Saved ${diffMin}m ago`
+    const diffHour = Math.floor(diffMin / 60)
+    return `Saved ${diffHour}h ago`
+  }
 
   // ---------------------------------------------------------------------------
   // Upload eligibility guards
@@ -152,6 +195,30 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
           <div className="h-6 w-[1px] bg-dark-border" />
 
           <div className="flex items-center gap-8">
+            {/* Save — wired to saveProject via Zustand */}
+            <Button
+              id="topbar-save-btn"
+              variant={canSave ? 'primary' : 'ghost'}
+              size="sm"
+              className={
+                canSave
+                  ? 'h-[32px] transition-all duration-300'
+                  : 'h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300'
+              }
+              leftIcon={<Save className="w-4 h-4" />}
+              isLoading={projectSaving}
+              disabled={!canSave}
+              onClick={handleSave}
+            >
+              {projectSaving ? 'Saving...' : 'Save'}
+            </Button>
+
+            {lastSavedAt && !projectSaving && (
+              <span className="text-[11px] text-disabled font-mono hidden lg:block">
+                {formatSavedAgo(lastSavedAt, now)}
+              </span>
+            )}
+
             {/* Generate — placeholder, not yet implemented */}
             <Button
               variant="ghost"

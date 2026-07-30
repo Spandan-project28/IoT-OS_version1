@@ -103,9 +103,16 @@ export interface IProjectSaveAsRequest {
   readonly suggestedTitle: string
 }
 
-/** Result of ProjectService (Save As flow). Same shape as IProjectSaveResult. */
+/**
+ * Result of the Save As flow.
+ *
+ * 'cancelled' is a distinct outcome, not an error (Slice 30, Ambiguity B) —
+ * the user dismissing the native save dialog is a normal action, not a
+ * failure. The handler returns this without ever calling ProjectService.save().
+ */
 export type IProjectSaveAsResult =
   | { status: 'success'; filePath: string; savedAt: string }
+  | { status: 'cancelled' }
   | { status: 'error'; code: ProjectErrorCode; error: string }
 
 // ---------------------------------------------------------------------------
