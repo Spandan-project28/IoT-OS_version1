@@ -29,11 +29,16 @@
  * parent window for the native save dialog.
  *
  * Invoke channels handled here (Renderer → Main):
- *   workspace:info → WorkspaceService.getInfo()
- *   project:save   → ProjectService.save() (Slice 30)
- *   project:saveAs → dialog.showSaveDialog() + ProjectService.save() (Slice 30)
- *   project:open   → ProjectService.open() (Slice 31)
- *   project:recent → RecentProjectsService.getAll() (Slice 31)
+ *   workspace:info   → WorkspaceService.getInfo()
+ *   project:save     → ProjectService.save() (Slice 30)
+ *   project:saveAs   → dialog.showSaveDialog() + ProjectService.save() (Slice 30)
+ *   project:open     → ProjectService.open() (Slice 31)
+ *   project:recent   → RecentProjectsService.getAll() (Slice 31)
+ *   project:autosave → ProjectService.autosave() (Slice 32)
+ *
+ * Push channels sent here (Main → Renderer):
+ *   project:saved → sent after a successful project:autosave, via mainWindow
+ *   (Slice 32)
  *
  * Lifecycle:
  *   projectIpcHandlers.register(mainWindow) — called once after app is ready.
@@ -55,6 +60,7 @@ import type {
   IProjectSaveResult,
   IProjectSaveAsRequest,
   IProjectSaveAsResult,
+  IProjectAutosaveRequest,
   IRecentProject
 } from '@shared/types/project-persistence'
 
@@ -184,6 +190,38 @@ function registerProjectIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle(ProjectIpcChannels.recent, (): IRecentProject[] => {
     return RecentProjectsService.getAll()
   })
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:autosave
+  //
+  // Autosaves to the last known destination — ProjectService.autosave()
+  // resolves the path itself (IProjectAutosaveRequest carries none). On
+  // success, pushes project:saved so any window can reconcile its own state,
+  // and records the project in the recents registry, matching save/saveAs.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(
+    ProjectIpcChannels.autosave,
+    async (_event, request: IProjectAutosaveRequest): Promise<IProjectSaveResult> => {
+      const result = await ProjectService.autosave(request.document)
+
+      if (result.status === 'success') {
+        mainWindow.webContents.send(ProjectIpcChannels.saved, {
+          filePath: result.filePath,
+          savedAt: result.savedAt,
+          saveType: 'autosave'
+        })
+
+        RecentProjectsService.push(
+          result.filePath,
+          request.document.title,
+          request.document.metadata.origin,
+          result.savedAt
+        )
+      }
+
+      return result
+    }
+  )
 }
 
 /**
@@ -199,6 +237,7 @@ function removeProjectIpcHandlers(): void {
   ipcMain.removeHandler(ProjectIpcChannels.saveAs)
   ipcMain.removeHandler(ProjectIpcChannels.open)
   ipcMain.removeHandler(ProjectIpcChannels.recent)
+  ipcMain.removeHandler(ProjectIpcChannels.autosave)
 }
 
 // ---------------------------------------------------------------------------

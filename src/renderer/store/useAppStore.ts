@@ -83,7 +83,7 @@ import type {
 import type { ITemplateDefinition } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 import type { IAIGenerateRequest } from '@shared/types/ai'
-import type { IRecentProject } from '@shared/types/project-persistence'
+import type { IRecentProject, IProjectSavedPayload } from '@shared/types/project-persistence'
 
 // ---------------------------------------------------------------------------
 // Safe default hardware state
@@ -519,6 +519,49 @@ export interface AppState {
   loadRecentProjects: () => Promise<void>
 
   // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 32)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Autosaves the active project to its last known path.
+   *
+   * No-op (no IPC call) if there is no active project, no known path, or a
+   * manual save (projectSaving) is already in flight — the next debounce
+   * cycle will retry naturally; nothing is queued.
+   *
+   * On success, writes nothing itself: lastSaveType/lastSavedAt/projectDirty
+   * are updated exclusively by the project:saved push subscription
+   * (initializeProjectSync()), decoupling "who triggered the write" from
+   * "who updates the store".
+   *
+   * On a typed error or thrown transport failure: logged via console.error
+   * only. Never mutates projectError, projectOpenError, or any other state —
+   * autosave failures are background failures with no UI.
+   *
+   * Never throws into React.
+   */
+  autosaveProject: () => Promise<void>
+
+  /**
+   * Subscribes to project:saved push events from the Main process.
+   *
+   * Applies a staleness guard: only updates lastSaveType/lastSavedAt/
+   * projectDirty when payload.filePath matches the currently active
+   * project's path — a push for a project that's no longer active is
+   * discarded.
+   *
+   * Safe to call multiple times — subsequent calls are no-ops, matching
+   * initializeSerial()'s guard pattern.
+   */
+  initializeProjectSync: () => void
+
+  /**
+   * Unsubscribes from project:saved push events.
+   * Nulls the private unsubscribe handle. Safe to call multiple times.
+   */
+  disposeProjectSync: () => void
+
+  // -------------------------------------------------------------------------
   // UI Actions
   // -------------------------------------------------------------------------
 
@@ -734,6 +777,27 @@ let _serialDataUnsubscribe: (() => void) | null = null
  * Null until initializeSerial() has been called.
  */
 let _serialStatusUnsubscribe: (() => void) | null = null
+
+/**
+ * Unsubscribe handle for window.api.project.onSaved().
+ * Null until initializeProjectSync() has been called.
+ */
+let _projectSavedUnsubscribe: (() => void) | null = null
+
+/**
+ * Autosave debounce timer (Phase 7, Slice 32). Owned exclusively by
+ * updateFirmware(): every call clears any pending timer and starts a new
+ * one, so exactly one autosaveProject() call fires per 3-second window of
+ * inactivity — never one per edit, never on a fixed schedule. Also cleared
+ * whenever the active project changes (openProject, selectTemplate,
+ * generateAiProject, clearProject) so a timer scheduled by one project can
+ * never fire against a different, subsequently active one.
+ *
+ * A runtime resource, not application state — must never enter the Zustand
+ * store, matching the push-event unsubscribe handles above.
+ */
+const AUTOSAVE_DEBOUNCE_MS = 3000
+let _autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 // ---------------------------------------------------------------------------
 // Store implementation
@@ -1149,6 +1213,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await window.api.ai.generate(request)
 
       if (result.status === 'success') {
+        // The active project is changing — cancel any pending autosave
+        // debounce (Slice 32) so it can never fire against the project
+        // being generated now.
+        if (_autosaveDebounceTimer !== null) {
+          clearTimeout(_autosaveDebounceTimer)
+          _autosaveDebounceTimer = null
+        }
+
         // Step 3a: Store the returned document as the active project.
         // Atomic replacement — never mutates the previous instance (ADR-016).
         // A freshly generated project is never dirty and has no saved path.
@@ -1178,6 +1250,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     //
     // aiLoading is intentionally NOT reset here — if a generation is in progress,
     // the loading indicator must remain until the operation's finally block fires.
+    //
+    // The active project is changing — cancel any pending autosave debounce
+    // (Slice 32) so it can never fire against whatever becomes active next.
+    if (_autosaveDebounceTimer !== null) {
+      clearTimeout(_autosaveDebounceTimer)
+      _autosaveDebounceTimer = null
+    }
+
     set({
       currentProjectDoc: null,
       aiError: null,
@@ -1217,6 +1297,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       metadata
     }
 
+    // The active project is changing — cancel any pending autosave debounce
+    // (Slice 32) so it can never fire against the template being loaded now.
+    if (_autosaveDebounceTimer !== null) {
+      clearTimeout(_autosaveDebounceTimer)
+      _autosaveDebounceTimer = null
+    }
+
     set({
       currentProjectDoc: projectDoc,
       // Clear any stale AI error from a previous generation attempt.
@@ -1246,6 +1333,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         projectDirty: true
       }
     })
+
+    // Autosave debounce (Slice 32): every edit resets the timer, so exactly
+    // one autosaveProject() call fires 3 seconds after the last edit — never
+    // one per keystroke, never on a fixed schedule.
+    if (_autosaveDebounceTimer !== null) {
+      clearTimeout(_autosaveDebounceTimer)
+      _autosaveDebounceTimer = null
+    }
+
+    if (get().currentProjectDoc) {
+      _autosaveDebounceTimer = setTimeout(() => {
+        _autosaveDebounceTimer = null
+        void get().autosaveProject()
+      }, AUTOSAVE_DEBOUNCE_MS)
+    }
   },
 
   // -------------------------------------------------------------------------
@@ -1280,6 +1382,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (get().currentProjectPath !== path) return
 
       if (result.status === 'success') {
+        // A successful manual save already persists the latest document —
+        // any autosave debounce pending from before this save is now
+        // obsolete and must not fire.
+        if (_autosaveDebounceTimer !== null) {
+          clearTimeout(_autosaveDebounceTimer)
+          _autosaveDebounceTimer = null
+        }
+
         set({
           currentProjectPath: result.filePath,
           projectDirty: false,
@@ -1318,6 +1428,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
 
       if (result.status === 'success') {
+        // A successful manual save already persists the latest document —
+        // any autosave debounce pending from before this save is now
+        // obsolete and must not fire.
+        if (_autosaveDebounceTimer !== null) {
+          clearTimeout(_autosaveDebounceTimer)
+          _autosaveDebounceTimer = null
+        }
+
         set({
           currentProjectPath: result.filePath,
           projectDirty: false,
@@ -1354,6 +1472,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await window.api.project.open({ filePath })
 
       if (result.status === 'success') {
+        // The active project is changing — cancel any pending autosave
+        // debounce (Slice 32) so it can never fire against the project
+        // being opened now.
+        if (_autosaveDebounceTimer !== null) {
+          clearTimeout(_autosaveDebounceTimer)
+          _autosaveDebounceTimer = null
+        }
+
         set({
           currentProjectDoc: result.document,
           currentProjectPath: result.filePath,
@@ -1381,6 +1507,56 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ recentProjects })
     } catch {
       // Best-effort — a transport failure leaves recentProjects unchanged.
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 32)
+  // -------------------------------------------------------------------------
+
+  autosaveProject: async () => {
+    const { currentProjectDoc, currentProjectPath, projectSaving } = get()
+    if (!currentProjectDoc || currentProjectPath === null || projectSaving) return
+
+    if (!window.api?.project) return
+
+    try {
+      const result = await window.api.project.autosave({ document: currentProjectDoc })
+
+      if (result.status === 'error') {
+        console.error('[useAppStore] Autosave failed:', result.error)
+      }
+      // On success: lastSaveType/lastSavedAt/projectDirty are updated
+      // exclusively by the project:saved push subscription, not here.
+    } catch (err: unknown) {
+      console.error('[useAppStore] Autosave failed unexpectedly:', err)
+    }
+  },
+
+  initializeProjectSync: () => {
+    // Guard: prevent duplicate subscriptions
+    if (_projectSavedUnsubscribe !== null) return
+
+    if (!window.api?.project) return
+
+    _projectSavedUnsubscribe = window.api.project.onSaved((payload: IProjectSavedPayload) => {
+      // Staleness guard: a push for a project that's no longer active is
+      // discarded — the active project may have changed between the
+      // autosave firing and this push arriving.
+      if (get().currentProjectPath !== payload.filePath) return
+
+      set({
+        lastSaveType: payload.saveType,
+        lastSavedAt: payload.savedAt,
+        projectDirty: false
+      })
+    })
+  },
+
+  disposeProjectSync: () => {
+    if (_projectSavedUnsubscribe) {
+      _projectSavedUnsubscribe()
+      _projectSavedUnsubscribe = null
     }
   }
 }))

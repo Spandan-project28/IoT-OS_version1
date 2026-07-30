@@ -12,7 +12,9 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     disposeHardware,
     initializeSerial,
     disposeSerial,
-    loadRecentProjects
+    loadRecentProjects,
+    initializeProjectSync,
+    disposeProjectSync
   } = useAppStore()
 
   useEffect(() => {
@@ -21,11 +23,24 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     // Phase 7, Slice 31: one-time load — recentProjects is intentionally
     // never refreshed again after this (see useAppStore.ts's doc comment).
     void loadRecentProjects()
+    // Phase 7, Slice 32: subscribes to project:saved so autosave (and any
+    // other saveType) is reflected in the store regardless of which action
+    // triggered the write.
+    initializeProjectSync()
     return () => {
       disposeHardware()
       disposeSerial()
+      disposeProjectSync()
     }
-  }, [initializeHardware, disposeHardware, initializeSerial, disposeSerial, loadRecentProjects])
+  }, [
+    initializeHardware,
+    disposeHardware,
+    initializeSerial,
+    disposeSerial,
+    loadRecentProjects,
+    initializeProjectSync,
+    disposeProjectSync
+  ])
 
   // ---------------------------------------------------------------------------
   // Save keyboard shortcuts (Phase 7, Slice 30)

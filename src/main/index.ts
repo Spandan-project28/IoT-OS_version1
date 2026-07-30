@@ -12,6 +12,7 @@ import { serialIpcHandlers } from './ipc/serialIpcHandlers'
 import { aiIpcHandlers } from './ipc/aiIpcHandlers'
 import { projectIpcHandlers } from './ipc/projectIpcHandlers'
 import { WorkspaceService } from './services/WorkspaceService'
+import { ProjectService } from './services/ProjectService'
 
 // ---------------------------------------------------------------------------
 // Window factory
@@ -136,7 +137,27 @@ app.whenReady().then(async () => {
 // Cleanup
 // ---------------------------------------------------------------------------
 
-app.on('before-quit', () => {
+// Set once flush() has been attempted and app.quit() is re-triggered, so the
+// second before-quit pass lets the quit proceed instead of preventing it again.
+let _isQuitting = false
+
+app.on('before-quit', (event) => {
+  if (_isQuitting) return
+  event.preventDefault()
+
+  // Persist the last known project state before the process exits (Slice
+  // 32). Best-effort — a flush failure is logged but never blocks quitting.
+  ProjectService.flush()
+    .catch((err: unknown) => {
+      console.error('[main] Flush on quit failed:', err)
+    })
+    .finally(() => {
+      _isQuitting = true
+      app.quit()
+    })
+})
+
+app.on('will-quit', () => {
   // Stop hardware discovery and remove IPC handlers before the process exits.
   // This prevents lingering polling intervals or open handles from delaying
   // the shutdown sequence on Windows.

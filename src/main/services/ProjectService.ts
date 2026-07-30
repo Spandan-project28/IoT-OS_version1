@@ -30,6 +30,13 @@
  *   destination).
  * - Every successful save() call updates module-level _pendingDoc and
  *   _pendingPath, consumed by flush() in Slice 32.
+ *
+ * Slice 32 scope:
+ * - open() additionally updates _pending on success, completing the
+ *   persistence lifecycle so autosave/flush work for a project opened from
+ *   disk without requiring an intervening manual save.
+ * - autosave() and flush() are new, both built entirely on the existing
+ *   save() — no duplicated persistence logic.
  */
 
 import * as fs from 'fs/promises'
@@ -41,8 +48,10 @@ import type { IProjectOpenResult, IProjectSaveResult } from '@shared/types/proje
 // Internal state
 //
 // The most recently saved document and the path it was saved to. Updated on
-// every successful save() call. Not read by anything in Slice 30 — consumed
-// by flush() in Slice 32 to persist final state on app quit.
+// every successful save() call, and on every successful open() call (Slice
+// 32) — consumed by autosave() (resolves the destination path, since
+// IProjectAutosaveRequest carries no filePath) and flush() (the quit-time
+// persistence operation).
 //
 // Held as a single object (rather than two module-level `let` bindings) so
 // save() can update both fields via property assignment — TypeScript's
@@ -254,9 +263,17 @@ async function open(filePath: string): Promise<IProjectOpenResult> {
     }
   }
 
+  const document = documentFromDto(parsed)
+
+  // Completes the persistence lifecycle (Slice 32): a project opened but
+  // never manually saved this session still has a known autosave/flush
+  // destination, exactly as if it had just been saved.
+  _pending.doc = document
+  _pending.path = filePath
+
   return {
     status: 'success',
-    document: documentFromDto(parsed),
+    document,
     filePath,
     savedAt: parsed.savedAt
   }
@@ -286,11 +303,48 @@ async function save(doc: IProjectDocument, filePath: string): Promise<IProjectSa
   return { status: 'success', filePath, savedAt }
 }
 
+/**
+ * Autosaves doc to the last known destination (_pending.path), since
+ * IProjectAutosaveRequest carries no filePath of its own. Delegates entirely
+ * to save() — no duplicated write logic.
+ *
+ * Returns a typed error if no destination is known yet (no save or open has
+ * succeeded this session). 'unknown' is this type's documented catch-all —
+ * no other ProjectErrorCode describes "no destination is known at all".
+ *
+ * Never throws — matches every other public method's convention.
+ */
+async function autosave(doc: IProjectDocument): Promise<IProjectSaveResult> {
+  if (_pending.path === null) {
+    return { status: 'error', code: 'unknown', error: 'No known save location for autosave.' }
+  }
+
+  return save(doc, _pending.path)
+}
+
+/**
+ * Re-persists the last known document to its last known path, if any.
+ * Delegates entirely to save() — no duplicated write logic.
+ *
+ * Returns null (not an error) when nothing is pending — a normal state, e.g.
+ * app quit before any save or open occurred this session.
+ *
+ * Never throws — callers (main/index.ts's before-quit handler) treat a
+ * rejected promise as a genuine failure to log, not an expected outcome.
+ */
+async function flush(): Promise<IProjectSaveResult | null> {
+  if (_pending.doc === null || _pending.path === null) return null
+
+  return save(_pending.doc, _pending.path)
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
 export const ProjectService = Object.freeze({
   open,
-  save
+  save,
+  autosave,
+  flush
 })
