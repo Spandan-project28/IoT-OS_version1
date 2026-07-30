@@ -25,6 +25,13 @@ export default defineConfig({
         '@shared': resolve('src/shared')
       }
     },
+    // Monaco's editor.worker.js (imported via `?worker`) is an ES module
+    // (monaco-editor's esm/ distribution) — it must be bundled as an ES
+    // module worker, not Vite's default IIFE format, for Slice 29's
+    // locally-bundled Monaco integration to work offline.
+    worker: {
+      format: 'es'
+    },
     plugins: [react(), tailwindcss()]
   }
 })

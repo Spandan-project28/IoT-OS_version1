@@ -165,6 +165,28 @@ export interface AppState {
    */
   aiError: string | null
 
+  /**
+   * True once the active project has unsaved edits.
+   *
+   * False immediately after selectTemplate(), generateAiProject(), or
+   * clearProject() — a freshly loaded (or absent) project is never dirty.
+   * Set to true by the first updateFirmware() call after a document is
+   * (re)loaded. Nothing in Slice 29 ever resets it back to false — that
+   * begins with Save in Slice 30.
+   */
+  projectDirty: boolean
+
+  /**
+   * Absolute path of the file the active project was last saved to or
+   * opened from.
+   *
+   * Null on startup and after clearProject(), selectTemplate(), or
+   * generateAiProject() — Slice 29 introduces this field but nothing in
+   * this slice ever assigns it a non-null value. Populated starting with
+   * Save (Slice 30) and Open (Slice 31).
+   */
+  currentProjectPath: string | null
+
   // -------------------------------------------------------------------------
   // Hardware State (Phase 2, Slice 6)
   //
@@ -315,6 +337,29 @@ export interface AppState {
    * indicator should remain until the operation completes.
    */
   clearProject: () => void
+
+  // -------------------------------------------------------------------------
+  // Firmware Editing Actions (Phase 7, Slice 29)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Replaces the active project's firmware source with Monaco's current
+   * editor content and marks the project dirty.
+   *
+   * Immutability contract (ADR-016): constructs a new IProjectDocument via
+   * spread — every field except firmware is carried over unchanged,
+   * including id, which is never regenerated here (only selectTemplate()
+   * and generateAiProject() mint a new id).
+   *
+   * No-op if currentProjectDoc is null — Monaco is never mounted without an
+   * active project, so this path is not reachable through the UI, but the
+   * guard keeps the action safe to call unconditionally.
+   *
+   * Pure synchronous action. No IPC. No side effects beyond the store.
+   *
+   * @param firmware - The complete firmware source from Monaco's onChange.
+   */
+  updateFirmware: (firmware: string) => void
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -552,6 +597,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentProjectDoc: null,
   aiLoading: false,
   aiError: null,
+  projectDirty: false,
+  currentProjectPath: null,
 
   // -------------------------------------------------------------------------
   // Hardware State initial values
@@ -940,7 +987,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (result.status === 'success') {
         // Step 3a: Store the returned document as the active project.
         // Atomic replacement — never mutates the previous instance (ADR-016).
-        set({ currentProjectDoc: result.project })
+        // A freshly generated project is never dirty and has no saved path.
+        set({ currentProjectDoc: result.project, projectDirty: false, currentProjectPath: null })
       } else {
         // Step 3b: Surface the typed error. The code field allows the UI to
         // branch on error category without parsing the error string.
@@ -959,14 +1007,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearProject: () => {
     // Resets all project-related state atomically.
-    // currentProjectDoc and aiError are cleared together because they both
-    // describe the same concept: the currently active project.
+    // currentProjectDoc, aiError, projectDirty, and currentProjectPath are
+    // cleared together because they all describe the same concept: the
+    // currently active project. There is nothing to be dirty or have a path
+    // when there is no project.
     //
     // aiLoading is intentionally NOT reset here — if a generation is in progress,
     // the loading indicator must remain until the operation's finally block fires.
     set({
       currentProjectDoc: null,
-      aiError: null
+      aiError: null,
+      projectDirty: false,
+      currentProjectPath: null
     })
   },
 
@@ -1004,7 +1056,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       currentProjectDoc: projectDoc,
       // Clear any stale AI error from a previous generation attempt.
-      aiError: null
+      aiError: null,
+      // A freshly selected template is never dirty and has no saved path.
+      projectDirty: false,
+      currentProjectPath: null
+    })
+  },
+
+  // -------------------------------------------------------------------------
+  // Firmware Editing Actions (Phase 7, Slice 29)
+  // -------------------------------------------------------------------------
+
+  updateFirmware: (firmware: string) => {
+    set((state) => {
+      // No-op if there is no active project — Monaco is never mounted
+      // without one, but this guard keeps the action safe to call
+      // unconditionally.
+      if (!state.currentProjectDoc) return state
+
+      return {
+        // Atomic replacement (ADR-016): every field except firmware is
+        // carried over unchanged, including id — updateFirmware() never
+        // mints a new one.
+        currentProjectDoc: { ...state.currentProjectDoc, firmware },
+        projectDirty: true
+      }
     })
   }
 }))

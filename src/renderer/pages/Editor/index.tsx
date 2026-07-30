@@ -25,6 +25,7 @@
 import { TopBar } from '../../components/layout/TopBar'
 import { Panel } from '../../components/common/Panel'
 import { ScrollContainer } from '../../components/common/ScrollContainer'
+import { MonacoEditorPanel } from '../../components/editor/MonacoEditorPanel'
 import { useAppStore } from '../../store/useAppStore'
 import {
   Sparkles,
@@ -224,7 +225,8 @@ function PromptInput({
 // ---------------------------------------------------------------------------
 
 export function Editor(): React.JSX.Element {
-  const { currentProjectDoc, aiLoading, aiError, generateAiProject, hardware } = useAppStore()
+  const { currentProjectDoc, aiLoading, aiError, generateAiProject, hardware, updateFirmware } =
+    useAppStore()
 
   // Derive the board hint from the connected board, if any.
   // IBoard.type is 'arduino' | 'esp32' | 'unknown'. We map it to the SupportedBoard
@@ -305,11 +307,11 @@ export function Editor(): React.JSX.Element {
             </div>
           ) : currentProjectDoc ? (
             /* Firmware source — rendered from IProjectDocument regardless of origin */
-            <ScrollContainer className="p-0 h-full">
-              <pre className="p-24 text-[13px] font-mono text-text-primary leading-relaxed whitespace-pre-wrap break-words">
-                {currentProjectDoc.firmware}
-              </pre>
-            </ScrollContainer>
+            <MonacoEditorPanel
+              value={currentProjectDoc.firmware}
+              documentId={currentProjectDoc.id}
+              onChange={updateFirmware}
+            />
           ) : (
             /* Empty state — no project open */
             <div className="flex flex-col items-center justify-center h-full text-text-secondary bg-surface text-[14px]">

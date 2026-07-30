@@ -41,7 +41,8 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
     uploadLoading,
     uploadError,
     lastUploadResult,
-    compileAndUploadFirmware
+    compileAndUploadFirmware,
+    projectDirty
   } = useAppStore()
 
   const connectedBoard = hardware.connectedBoards[0] ?? null
@@ -97,6 +98,14 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
             <>
               <div className="w-[1px] h-4 bg-dark-border mx-4" />
               <div className="text-white text-[14px] font-medium">{children}</div>
+              {projectDirty && (
+                <span
+                  className="text-primary text-[16px] leading-none select-none"
+                  title="Unsaved changes"
+                >
+                  ●
+                </span>
+              )}
             </>
           )}
         </div>
