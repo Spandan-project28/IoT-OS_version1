@@ -11,17 +11,45 @@ import {
   AlertCircle,
   RefreshCw,
   CheckCircle2,
-  XCircle
+  XCircle,
+  FolderOpen,
+  Loader2
 } from 'lucide-react'
 import { Button } from '../../components/common/Button'
+import { useNavigate } from 'react-router-dom'
 import React from 'react'
 
 export function Home(): React.JSX.Element {
-  const { hardware, hardwareLoading, hardwareError, hardwareInitialized, refreshHardware } =
-    useAppStore()
+  const {
+    hardware,
+    hardwareLoading,
+    hardwareError,
+    hardwareInitialized,
+    refreshHardware,
+    recentProjects,
+    projectOpening,
+    openProject
+  } = useAppStore()
+  const navigate = useNavigate()
 
   const connectedBoard = hardware.connectedBoards[0] ?? null
   const portCount = hardware.ports.length
+
+  // ---------------------------------------------------------------------------
+  // Open from Recent Projects
+  //
+  // Navigates to the Editor only after a successful open — openProject()
+  // clears projectOpenError on success and leaves it set on failure, so
+  // re-checking the store's own state after the await (rather than trusting
+  // a local return value) is the same pattern used for staleness checks
+  // elsewhere in this store.
+  // ---------------------------------------------------------------------------
+  async function handleOpenRecent(filePath: string): Promise<void> {
+    await openProject(filePath)
+    if (useAppStore.getState().projectOpenError === null) {
+      void navigate('/editor')
+    }
+  }
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -131,6 +159,47 @@ export function Home(): React.JSX.Element {
               </div>
             </Card>
           </div>
+
+          {/* Recent Projects */}
+          {recentProjects.length > 0 && (
+            <Card className="p-0 overflow-hidden">
+              <div className="px-20 py-14 border-b border-border flex items-center justify-between">
+                <h2 className="font-semibold text-[14px] text-text-primary tracking-tight">
+                  Recent Projects
+                </h2>
+                <Badge variant="default">{recentProjects.length}</Badge>
+              </div>
+
+              <div className="divide-y divide-border">
+                {recentProjects.map((entry) => (
+                  <button
+                    key={entry.filePath}
+                    type="button"
+                    disabled={projectOpening}
+                    onClick={() => void handleOpenRecent(entry.filePath)}
+                    className="w-full flex items-center justify-between px-20 py-14 text-left hover:bg-surface-elevated transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <div className="flex items-center gap-12 min-w-0">
+                      {projectOpening ? (
+                        <Loader2 className="w-4 h-4 shrink-0 text-text-secondary animate-spin" />
+                      ) : (
+                        <FolderOpen className="w-4 h-4 shrink-0 text-text-secondary" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-medium text-text-primary truncate">
+                          {entry.title}
+                        </div>
+                        <div className="text-[12px] text-text-secondary font-mono truncate">
+                          {entry.filePath}
+                        </div>
+                      </div>
+                    </div>
+                    <Badge variant="default">{entry.origin}</Badge>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Port list */}
           {portCount > 0 && (

@@ -7,16 +7,25 @@ interface AppProvidersProps {
 }
 
 export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
-  const { initializeHardware, disposeHardware, initializeSerial, disposeSerial } = useAppStore()
+  const {
+    initializeHardware,
+    disposeHardware,
+    initializeSerial,
+    disposeSerial,
+    loadRecentProjects
+  } = useAppStore()
 
   useEffect(() => {
     initializeHardware()
     initializeSerial()
+    // Phase 7, Slice 31: one-time load — recentProjects is intentionally
+    // never refreshed again after this (see useAppStore.ts's doc comment).
+    void loadRecentProjects()
     return () => {
       disposeHardware()
       disposeSerial()
     }
-  }, [initializeHardware, disposeHardware, initializeSerial, disposeSerial])
+  }, [initializeHardware, disposeHardware, initializeSerial, disposeSerial, loadRecentProjects])
 
   // ---------------------------------------------------------------------------
   // Save keyboard shortcuts (Phase 7, Slice 30)

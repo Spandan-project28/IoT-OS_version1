@@ -32,6 +32,8 @@
  *   workspace:info → WorkspaceService.getInfo()
  *   project:save   → ProjectService.save() (Slice 30)
  *   project:saveAs → dialog.showSaveDialog() + ProjectService.save() (Slice 30)
+ *   project:open   → ProjectService.open() (Slice 31)
+ *   project:recent → RecentProjectsService.getAll() (Slice 31)
  *
  * Lifecycle:
  *   projectIpcHandlers.register(mainWindow) — called once after app is ready.
@@ -47,10 +49,13 @@ import { RecentProjectsService } from '../services/RecentProjectsService'
 import { WorkspaceIpcChannels, ProjectIpcChannels } from '@shared/types/ipc'
 import type { IWorkspaceInfo } from '@shared/types/workspace'
 import type {
+  IProjectOpenRequest,
+  IProjectOpenResult,
   IProjectSaveRequest,
   IProjectSaveResult,
   IProjectSaveAsRequest,
-  IProjectSaveAsResult
+  IProjectSaveAsResult,
+  IRecentProject
 } from '@shared/types/project-persistence'
 
 // ---------------------------------------------------------------------------
@@ -148,6 +153,37 @@ function registerProjectIpcHandlers(mainWindow: BrowserWindow): void {
       return result
     }
   )
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:open
+  //
+  // Reads, parses, and reconstructs a project file from the given path. If
+  // the file no longer exists, the stale entry is removed from the recents
+  // registry before returning — a deleted/moved file must not keep showing
+  // up in Recent Projects.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(
+    ProjectIpcChannels.open,
+    async (_event, request: IProjectOpenRequest): Promise<IProjectOpenResult> => {
+      const result = await ProjectService.open(request.filePath)
+
+      if (result.status === 'error' && result.code === 'file_not_found') {
+        RecentProjectsService.remove(request.filePath)
+      }
+
+      return result
+    }
+  )
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:recent
+  //
+  // Returns the full recent-projects registry, most recently pushed first.
+  // Pure passthrough — no filtering or side effects.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(ProjectIpcChannels.recent, (): IRecentProject[] => {
+    return RecentProjectsService.getAll()
+  })
 }
 
 /**
@@ -161,6 +197,8 @@ function removeProjectIpcHandlers(): void {
   ipcMain.removeHandler(WorkspaceIpcChannels.getInfo)
   ipcMain.removeHandler(ProjectIpcChannels.save)
   ipcMain.removeHandler(ProjectIpcChannels.saveAs)
+  ipcMain.removeHandler(ProjectIpcChannels.open)
+  ipcMain.removeHandler(ProjectIpcChannels.recent)
 }
 
 // ---------------------------------------------------------------------------

@@ -83,6 +83,7 @@ import type {
 import type { ITemplateDefinition } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 import type { IAIGenerateRequest } from '@shared/types/ai'
+import type { IRecentProject } from '@shared/types/project-persistence'
 
 // ---------------------------------------------------------------------------
 // Safe default hardware state
@@ -221,6 +222,36 @@ export interface AppState {
    * A cancelled Save As dialog is NOT an error and never sets this field.
    */
   projectError: string | null
+
+  /**
+   * All entries in the recent-projects registry, most recently saved/opened
+   * first.
+   *
+   * Loaded exactly once, at application startup, by AppProviders.tsx's mount
+   * effect. Nothing else refreshes it — a project saved, opened, or removed
+   * mid-session will not be reflected here until the app restarts. This is
+   * an accepted, explicit limitation of Slice 31; automatic synchronization
+   * is deferred to a later slice.
+   */
+  recentProjects: IRecentProject[]
+
+  /**
+   * True while openProject() is awaiting the IPC response.
+   *
+   * Reset to false in the finally block, unconditionally — including after
+   * a thrown transport failure — so it can never get stuck true.
+   */
+  projectOpening: boolean
+
+  /**
+   * Human-readable error message from the last failed openProject() call.
+   *
+   * Null on startup, cleared at the start of each new openProject() call
+   * (and again on that call's success), and set only when that call fails.
+   * Entirely independent of projectError — opening and saving are separate
+   * operations with separate state, never shared.
+   */
+  projectOpenError: string | null
 
   // -------------------------------------------------------------------------
   // Hardware State (Phase 2, Slice 6)
@@ -446,6 +477,46 @@ export interface AppState {
    * Never throws into React. Components never need a try/catch around this call.
    */
   saveAsProject: () => Promise<void>
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 31)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Opens a project from an already-known absolute path (the Recent
+   * Projects flow — no native file-picker exists yet).
+   *
+   * Lifecycle:
+   *   1. Sets projectOpening = true and clears projectOpenError.
+   *   2. Calls window.api.project.open({ filePath }).
+   *   3a. On success: currentProjectDoc, currentProjectPath, lastSavedAt are
+   *       restored from the result; projectDirty = false. lastSaveType is
+   *       reset to null — opening is not a save, so it must never claim
+   *       'manual'. projectOpenError = null.
+   *   3b. On error: projectOpenError = error. Whatever project (if any) was
+   *       already active is left completely untouched.
+   *   3c. On IPC transport failure: captures the thrown error in
+   *       projectOpenError, leaving the active project untouched.
+   *   4. Always sets projectOpening = false in finally.
+   *
+   * Never reads or writes projectSaving/projectError — opening and saving
+   * are independent operations with independent state.
+   * Never throws into React. Components never need a try/catch around this call.
+   */
+  openProject: (filePath: string) => Promise<void>
+
+  /**
+   * Loads the full recent-projects registry into recentProjects.
+   *
+   * Called exactly once, from AppProviders.tsx's mount effect. Nothing else
+   * calls this — recentProjects is not refreshed after save, saveAs, open,
+   * or a stale-entry removal within the same session (accepted limitation,
+   * Slice 31).
+   *
+   * Never throws into React — a transport failure silently leaves
+   * recentProjects at its previous value.
+   */
+  loadRecentProjects: () => Promise<void>
 
   // -------------------------------------------------------------------------
   // UI Actions
@@ -689,6 +760,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastSaveType: null,
   lastSavedAt: null,
   projectError: null,
+  recentProjects: [],
+  projectOpening: false,
+  projectOpenError: null,
 
   // -------------------------------------------------------------------------
   // Hardware State initial values
@@ -1261,6 +1335,52 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ projectError: message })
     } finally {
       set({ projectSaving: false })
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 31)
+  // -------------------------------------------------------------------------
+
+  openProject: async (filePath: string) => {
+    if (!window.api?.project) {
+      set({ projectOpenError: 'Project API is not available.', projectOpening: false })
+      return
+    }
+
+    set({ projectOpening: true, projectOpenError: null })
+
+    try {
+      const result = await window.api.project.open({ filePath })
+
+      if (result.status === 'success') {
+        set({
+          currentProjectDoc: result.document,
+          currentProjectPath: result.filePath,
+          projectDirty: false,
+          lastSaveType: null,
+          lastSavedAt: result.savedAt,
+          projectOpenError: null
+        })
+      } else {
+        set({ projectOpenError: result.error })
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Open failed unexpectedly.'
+      set({ projectOpenError: message })
+    } finally {
+      set({ projectOpening: false })
+    }
+  },
+
+  loadRecentProjects: async () => {
+    if (!window.api?.project) return
+
+    try {
+      const recentProjects = await window.api.project.getRecent()
+      set({ recentProjects })
+    } catch {
+      // Best-effort — a transport failure leaves recentProjects unchanged.
     }
   }
 }))
