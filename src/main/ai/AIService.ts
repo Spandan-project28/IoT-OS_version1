@@ -75,6 +75,7 @@ import { AIClient } from './AIClient'
 import { MockAIClient } from './MockAIClient'
 import { ResponseParser } from './ResponseParser'
 import { ResponseValidator } from './ResponseValidator'
+import { nanoid } from 'nanoid'
 import type { IAIGenerateRequest, IAIProviderConfig, IAIResult } from '@shared/types/ai'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 
@@ -179,6 +180,7 @@ function mapToProjectDocument(
   }
 
   const document: IProjectDocument = {
+    id: nanoid(),
     schemaVersion: 1,
     title: response.title,
     description: response.description,

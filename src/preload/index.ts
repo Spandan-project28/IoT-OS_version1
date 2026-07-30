@@ -4,7 +4,9 @@ import {
   HardwareIpcChannels,
   UploadIpcChannels,
   SerialIpcChannels,
-  AiIpcChannels
+  AiIpcChannels,
+  ProjectIpcChannels,
+  WorkspaceIpcChannels
 } from '@shared/types/ipc'
 import type { IHardwareState } from '@shared/types/hardware'
 import type {
@@ -22,6 +24,21 @@ import type {
   ISerialResult
 } from '@shared/types/serial'
 import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
+import type {
+  IProjectOpenRequest,
+  IProjectOpenResult,
+  IProjectSaveRequest,
+  IProjectSaveResult,
+  IProjectSaveAsRequest,
+  IProjectSaveAsResult,
+  IProjectRenameRequest,
+  IProjectDeleteRequest,
+  IProjectDeleteResult,
+  IProjectAutosaveRequest,
+  IProjectSavedPayload,
+  IRecentProject
+} from '@shared/types/project-persistence'
+import type { IWorkspaceInfo } from '@shared/types/workspace'
 
 // ---------------------------------------------------------------------------
 // Hardware API
@@ -245,17 +262,106 @@ const aiApi = {
 }
 
 // ---------------------------------------------------------------------------
+// Workspace API
+//
+// Exposes a minimal, typed bridge for the workspace subsystem (Phase 7,
+// Slice 28).
+//
+// Architectural rules:
+// - Thin bridge only — no business logic.
+// - getInfo is the only channel with a live ipcMain handler in Slice 28.
+//
+// Channels:
+//   workspace.getInfo() — invoke workspace:info
+// ---------------------------------------------------------------------------
+
+const workspaceApi = {
+  /**
+   * Returns the resolved, already-created workspace root path.
+   */
+  getInfo: (): Promise<IWorkspaceInfo> =>
+    ipcRenderer.invoke(WorkspaceIpcChannels.getInfo) as Promise<IWorkspaceInfo>
+}
+
+// ---------------------------------------------------------------------------
+// Project API
+//
+// Exposes the full typed bridge for the project persistence subsystem
+// (Phase 7). The complete method surface is declared now so this file does
+// not need to change again in Slices 30-33 — only their owning slice's
+// ipcMain.handle registration needs to land for each method to start
+// working. Calling a method before its handler is registered rejects with
+// Electron's standard "no handler registered" error; this is expected and
+// safe (Slice 28 Refinements, topic 4 — Option A).
+//
+// Architectural rules:
+// - Thin bridge only — no business logic.
+// - Types flow from @shared/types/project-persistence — no duplication.
+// - No channel here has a live ipcMain handler in Slice 28.
+//
+// Channels:
+//   project.open(request)       — invoke project:open       (Slice 31)
+//   project.save(request)       — invoke project:save        (Slice 30)
+//   project.saveAs(request)     — invoke project:saveAs      (Slice 30)
+//   project.rename(request)     — invoke project:rename      (Slice 33)
+//   project.delete(request)     — invoke project:delete      (Slice 33)
+//   project.getRecent()         — invoke project:recent      (Slice 31)
+//   project.autosave(request)   — invoke project:autosave    (Slice 32)
+//   project.onSaved(cb)         — subscribe to project:saved (Slice 32)
+// ---------------------------------------------------------------------------
+
+const projectApi = {
+  open: (request: IProjectOpenRequest): Promise<IProjectOpenResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.open, request) as Promise<IProjectOpenResult>,
+
+  save: (request: IProjectSaveRequest): Promise<IProjectSaveResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.save, request) as Promise<IProjectSaveResult>,
+
+  saveAs: (request: IProjectSaveAsRequest): Promise<IProjectSaveAsResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.saveAs, request) as Promise<IProjectSaveAsResult>,
+
+  rename: (request: IProjectRenameRequest): Promise<IProjectSaveResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.rename, request) as Promise<IProjectSaveResult>,
+
+  delete: (request: IProjectDeleteRequest): Promise<IProjectDeleteResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.delete, request) as Promise<IProjectDeleteResult>,
+
+  getRecent: (): Promise<IRecentProject[]> =>
+    ipcRenderer.invoke(ProjectIpcChannels.recent) as Promise<IRecentProject[]>,
+
+  autosave: (request: IProjectAutosaveRequest): Promise<IProjectSaveResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.autosave, request) as Promise<IProjectSaveResult>,
+
+  /**
+   * Subscribes to project:saved push events from the Main process.
+   * No handler ever sends this event in Slice 28 — the callback simply
+   * never fires until Slice 32 wires the autosave flow.
+   */
+  onSaved: (callback: (payload: IProjectSavedPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: IProjectSavedPayload): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(ProjectIpcChannels.saved, handler)
+    return () => {
+      ipcRenderer.removeListener(ProjectIpcChannels.saved, handler)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Composed API surface
 //
-// All future subsystems (project, settings) will be added here as
-// additional namespaced objects when their IPC slices are implemented.
+// All future subsystems (settings) will be added here as additional
+// namespaced objects when their IPC slices are implemented.
 // ---------------------------------------------------------------------------
 
 const api = {
   hardware: hardwareApi,
   upload: uploadApi,
   serial: serialApi,
-  ai: aiApi
+  ai: aiApi,
+  project: projectApi,
+  workspace: workspaceApi
 }
 
 // ---------------------------------------------------------------------------

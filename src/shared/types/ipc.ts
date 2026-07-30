@@ -62,6 +62,21 @@ import type {
   ISerialStatusPayload,
   ISerialResult
 } from './serial'
+import type {
+  IProjectOpenRequest,
+  IProjectOpenResult,
+  IProjectSaveRequest,
+  IProjectSaveResult,
+  IProjectSaveAsRequest,
+  IProjectSaveAsResult,
+  IProjectRenameRequest,
+  IProjectDeleteRequest,
+  IProjectDeleteResult,
+  IProjectAutosaveRequest,
+  IProjectSavedPayload,
+  IRecentProject
+} from './project-persistence'
+import type { IWorkspaceInfo } from './workspace'
 
 // ---------------------------------------------------------------------------
 // Hardware channels
@@ -362,3 +377,121 @@ export type AiGenerateRequest = IAIGenerateRequest
 
 /** Response payload for the ai:generate invoke channel. */
 export type AiGenerateResult = IAIResult
+
+// ---------------------------------------------------------------------------
+// Workspace channels (Phase 7, Slice 28)
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the workspace subsystem.
+ *
+ * The workspace is the on-disk root directory under which all projects are
+ * stored. This is the only channel group registered by projectIpcHandlers.ts
+ * in Slice 28 — the project:* channels below are defined now for a complete
+ * upfront contract but are wired in their respective later slices.
+ *
+ * Usage (Main):
+ *   ipcMain.handle(WorkspaceIpcChannels.getInfo, () => WorkspaceService.getInfo())
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(WorkspaceIpcChannels.getInfo)
+ *
+ * Usage (Renderer):
+ *   window.api.workspace.getInfo()
+ */
+export const WorkspaceIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Returns the resolved, already-created workspace root path.
+   * Response: IWorkspaceInfo
+   */
+  getInfo: 'workspace:info' as const
+} as const)
+
+/** Response payload for the workspace:info invoke channel. */
+export type WorkspaceGetInfoResult = IWorkspaceInfo
+
+// ---------------------------------------------------------------------------
+// Project channels (Phase 7)
+//
+// Channel-name contract is defined in full here in Slice 28. Only
+// workspace:info (above) has a live ipcMain.handle registration in Slice 28.
+// Each project:* channel below is registered by projectIpcHandlers.ts in its
+// owning slice:
+//   save, saveAs   — Slice 30
+//   open, recent   — Slice 31
+//   autosave, saved — Slice 32
+//   rename, delete — Slice 33
+// No stub handlers exist for unregistered channels — calling one before its
+// slice lands rejects with Electron's standard "no handler registered" error.
+// ---------------------------------------------------------------------------
+
+export const ProjectIpcChannels = Object.freeze({
+  /** Renderer → Main (invoke). Request: IProjectOpenRequest. Response: IProjectOpenResult. */
+  open: 'project:open' as const,
+
+  /** Renderer → Main (invoke). Request: IProjectSaveRequest. Response: IProjectSaveResult. */
+  save: 'project:save' as const,
+
+  /** Renderer → Main (invoke). Request: IProjectSaveAsRequest. Response: IProjectSaveAsResult. */
+  saveAs: 'project:saveAs' as const,
+
+  /** Renderer → Main (invoke). Request: IProjectRenameRequest. Response: IProjectSaveResult. */
+  rename: 'project:rename' as const,
+
+  /** Renderer → Main (invoke). Request: IProjectDeleteRequest. Response: IProjectDeleteResult. */
+  delete: 'project:delete' as const,
+
+  /** Renderer → Main (invoke). No request payload. Response: IRecentProject[]. */
+  recent: 'project:recent' as const,
+
+  /** Renderer → Main (invoke). Request: IProjectAutosaveRequest. Response: IProjectSaveResult. */
+  autosave: 'project:autosave' as const,
+
+  /** Main → Renderer (push / one-way). Payload: IProjectSavedPayload. */
+  saved: 'project:saved' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Project payload type aliases
+//
+// Documentation-only type aliases naming each channel's request and response
+// types. Not imported by handlers or preload (which import directly from
+// @shared/types/project-persistence) but serve as a clear contract reference.
+// ---------------------------------------------------------------------------
+
+/** Request payload for the project:open invoke channel. */
+export type ProjectOpenRequest = IProjectOpenRequest
+
+/** Response payload for the project:open invoke channel. */
+export type ProjectOpenResult = IProjectOpenResult
+
+/** Request payload for the project:save invoke channel. */
+export type ProjectSaveRequest = IProjectSaveRequest
+
+/** Response payload for the project:save invoke channel. */
+export type ProjectSaveResult = IProjectSaveResult
+
+/** Request payload for the project:saveAs invoke channel. */
+export type ProjectSaveAsRequest = IProjectSaveAsRequest
+
+/** Response payload for the project:saveAs invoke channel. */
+export type ProjectSaveAsResult = IProjectSaveAsResult
+
+/** Request payload for the project:rename invoke channel. */
+export type ProjectRenameRequest = IProjectRenameRequest
+
+/** Request payload for the project:delete invoke channel. */
+export type ProjectDeleteRequest = IProjectDeleteRequest
+
+/** Response payload for the project:delete invoke channel. */
+export type ProjectDeleteResult = IProjectDeleteResult
+
+/** Request payload for the project:autosave invoke channel. */
+export type ProjectAutosaveRequest = IProjectAutosaveRequest
+
+/** Response payload for the project:recent invoke channel. */
+export type ProjectRecentResult = IRecentProject[]
+
+/** Payload pushed on the project:saved channel. */
+export type ProjectSavedPayload = IProjectSavedPayload

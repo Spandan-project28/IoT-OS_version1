@@ -15,6 +15,21 @@ import type {
   ISerialResult
 } from '@shared/types/serial'
 import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
+import type {
+  IProjectOpenRequest,
+  IProjectOpenResult,
+  IProjectSaveRequest,
+  IProjectSaveResult,
+  IProjectSaveAsRequest,
+  IProjectSaveAsResult,
+  IProjectRenameRequest,
+  IProjectDeleteRequest,
+  IProjectDeleteResult,
+  IProjectAutosaveRequest,
+  IProjectSavedPayload,
+  IRecentProject
+} from '@shared/types/project-persistence'
+import type { IWorkspaceInfo } from '@shared/types/workspace'
 
 /**
  * IApi
@@ -137,11 +152,75 @@ export interface IAiApi {
   generate: (request: IAIGenerateRequest) => Promise<IAIResult>
 }
 
+export interface IWorkspaceApi {
+  /**
+   * Returns the resolved, already-created workspace root path
+   * (e.g. "C:\Users\<user>\Documents\IoTOS AI Projects").
+   */
+  getInfo: () => Promise<IWorkspaceInfo>
+}
+
+export interface IProjectApi {
+  /**
+   * Opens a project file from disk and reconstructs it into an
+   * IProjectDocument. No live handler exists until Slice 31 — calling this
+   * before then rejects with Electron's standard "no handler registered"
+   * error.
+   */
+  open: (request: IProjectOpenRequest) => Promise<IProjectOpenResult>
+
+  /**
+   * Saves the given document to filePath. No live handler exists until
+   * Slice 30.
+   */
+  save: (request: IProjectSaveRequest) => Promise<IProjectSaveResult>
+
+  /**
+   * Saves the given document to a user-chosen path via a native dialog. No
+   * live handler exists until Slice 30.
+   */
+  saveAs: (request: IProjectSaveAsRequest) => Promise<IProjectSaveAsResult>
+
+  /**
+   * Renames a project (updates its title and persists the full document).
+   * No live handler exists until Slice 33.
+   */
+  rename: (request: IProjectRenameRequest) => Promise<IProjectSaveResult>
+
+  /**
+   * Deletes a project file and its recents entry. No live handler exists
+   * until Slice 33.
+   */
+  delete: (request: IProjectDeleteRequest) => Promise<IProjectDeleteResult>
+
+  /**
+   * Returns the full recent-projects registry. No live handler exists until
+   * Slice 31.
+   */
+  getRecent: () => Promise<IRecentProject[]>
+
+  /**
+   * Autosaves the given document to its existing path. No live handler
+   * exists until Slice 32.
+   */
+  autosave: (request: IProjectAutosaveRequest) => Promise<IProjectSaveResult>
+
+  /**
+   * Subscribes to project:saved push events from the Main process, sent
+   * after a successful autosave. No handler ever sends this event until
+   * Slice 32 — the callback simply never fires until then.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onSaved: (callback: (payload: IProjectSavedPayload) => void) => () => void
+}
+
 export interface IApi {
   hardware: IHardwareApi
   upload: IUploadApi
   serial: ISerialApi
   ai: IAiApi
+  project: IProjectApi
+  workspace: IWorkspaceApi
 }
 
 declare global {

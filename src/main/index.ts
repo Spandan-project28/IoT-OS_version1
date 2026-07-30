@@ -10,6 +10,8 @@ import { hardwareIpcHandlers } from './ipc/hardwareIpcHandlers'
 import { uploadIpcHandlers } from './ipc/uploadIpcHandlers'
 import { serialIpcHandlers } from './ipc/serialIpcHandlers'
 import { aiIpcHandlers } from './ipc/aiIpcHandlers'
+import { projectIpcHandlers } from './ipc/projectIpcHandlers'
+import { WorkspaceService } from './services/WorkspaceService'
 
 // ---------------------------------------------------------------------------
 // Window factory
@@ -76,6 +78,12 @@ app.whenReady().then(async () => {
   // the Renderer loads faster than the first hardware scan completes.
   // -------------------------------------------------------------------------
 
+  // Step 0: Resolve and create the workspace root. Must complete before
+  // projectIpcHandlers.register() so the workspace:info handler never races
+  // an uncreated directory. Independent of the hardware subsystem below —
+  // ordering between the two is not architecturally constrained.
+  await WorkspaceService.initialize()
+
   // Step 1: Inject services into HardwareManager.
   HardwareManager.initialize({
     cli: ArduinoCLIService,
@@ -99,6 +107,11 @@ app.whenReady().then(async () => {
   // AI handlers are invoke/response only — no push events, no window reference needed.
   aiIpcHandlers.register()
 
+  // Project/workspace handlers — only workspace:info is live in Slice 28.
+  // window reference is accepted now for the project:saved push channel
+  // added in Slice 32.
+  projectIpcHandlers.register(mainWindow)
+
   // Step 4: Start hardware discovery (async — does not block window display).
   HardwareManager.start().catch((err: unknown) => {
     console.error('[HardwareManager] Failed to start hardware discovery:', err)
@@ -114,6 +127,7 @@ app.whenReady().then(async () => {
       uploadIpcHandlers.register()
       serialIpcHandlers.register(newWindow)
       aiIpcHandlers.register()
+      projectIpcHandlers.register(newWindow)
     }
   })
 })
@@ -134,6 +148,10 @@ app.on('before-quit', () => {
   serialIpcHandlers.remove()
   // AI handlers have no sessions or OS resources — removal is a simple deregister.
   aiIpcHandlers.remove()
+  // Project/workspace handlers have no sessions or OS resources in Slice 28 —
+  // removal is a simple deregister. WorkspaceService holds no OS handles and
+  // needs no explicit stop() call.
+  projectIpcHandlers.remove()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

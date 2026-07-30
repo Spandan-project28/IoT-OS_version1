@@ -183,6 +183,19 @@ export interface IProjectMetadata {
  */
 export interface IProjectDocument {
   /**
+   * Unique, permanent identity for this project document.
+   *
+   * Generated once (nanoid) at construction time by selectTemplate() or
+   * generateAiProject() — never regenerated afterwards, including on save,
+   * rename, autosave, or reload from disk. ProjectService.open() restores
+   * this value verbatim from the persisted file; it never mints a new one.
+   *
+   * Consumers: Monaco editor key prop (project-switch reset), project
+   * identity tracking across the persistence layer (Phase 7).
+   */
+  readonly id: string
+
+  /**
    * Schema version for this document.
    *
    * Literal type 1 — TypeScript enforces this at every construction site.

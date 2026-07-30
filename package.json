@@ -25,6 +25,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@monaco-editor/react": "^4.7.0",
     "lucide-react": "^1.25.0",
+    "nanoid": "^5.1.16",
     "react-router-dom": "^7.18.1",
     "serialport": "^13.0.0",
     "zustand": "^5.0.14"

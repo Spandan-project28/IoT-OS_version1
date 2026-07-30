@@ -64,6 +64,7 @@
  */
 
 import { create } from 'zustand'
+import { nanoid } from 'nanoid'
 import type { IHardwareState } from '@shared/types/hardware'
 import type {
   IUploadRequest,
@@ -986,6 +987,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const projectDoc: IProjectDocument = {
+      id: nanoid(),
       schemaVersion: 1,
       title: template.name,
       description: template.description,
