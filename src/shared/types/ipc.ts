@@ -69,7 +69,6 @@ import type {
   IProjectSaveResult,
   IProjectSaveAsRequest,
   IProjectSaveAsResult,
-  IProjectRenameRequest,
   IProjectDeleteRequest,
   IProjectDeleteResult,
   IProjectAutosaveRequest,
@@ -421,7 +420,7 @@ export type WorkspaceGetInfoResult = IWorkspaceInfo
 //   save, saveAs   — Slice 30
 //   open, recent   — Slice 31
 //   autosave, saved — Slice 32
-//   rename, delete — Slice 33
+//   delete — Slice 33
 // No stub handlers exist for unregistered channels — calling one before its
 // slice lands rejects with Electron's standard "no handler registered" error.
 // ---------------------------------------------------------------------------
@@ -435,9 +434,6 @@ export const ProjectIpcChannels = Object.freeze({
 
   /** Renderer → Main (invoke). Request: IProjectSaveAsRequest. Response: IProjectSaveAsResult. */
   saveAs: 'project:saveAs' as const,
-
-  /** Renderer → Main (invoke). Request: IProjectRenameRequest. Response: IProjectSaveResult. */
-  rename: 'project:rename' as const,
 
   /** Renderer → Main (invoke). Request: IProjectDeleteRequest. Response: IProjectDeleteResult. */
   delete: 'project:delete' as const,
@@ -477,9 +473,6 @@ export type ProjectSaveAsRequest = IProjectSaveAsRequest
 
 /** Response payload for the project:saveAs invoke channel. */
 export type ProjectSaveAsResult = IProjectSaveAsResult
-
-/** Request payload for the project:rename invoke channel. */
-export type ProjectRenameRequest = IProjectRenameRequest
 
 /** Request payload for the project:delete invoke channel. */
 export type ProjectDeleteRequest = IProjectDeleteRequest

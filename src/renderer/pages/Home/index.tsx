@@ -2,6 +2,7 @@ import { TopBar } from '../../components/layout/TopBar'
 import { Card } from '../../components/common/Card'
 import { Badge } from '../../components/common/Badge'
 import { SkeletonLoader } from '../../components/common/SkeletonLoader'
+import { DeleteConfirmModal } from '../../components/common/DeleteConfirmModal'
 import { useAppStore } from '../../store/useAppStore'
 import {
   Cpu,
@@ -13,7 +14,8 @@ import {
   CheckCircle2,
   XCircle,
   FolderOpen,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react'
 import { Button } from '../../components/common/Button'
 import { useNavigate } from 'react-router-dom'
@@ -28,9 +30,23 @@ export function Home(): React.JSX.Element {
     refreshHardware,
     recentProjects,
     projectOpening,
-    openProject
+    openProject,
+    deleteProject
   } = useAppStore()
   const navigate = useNavigate()
+
+  // ---------------------------------------------------------------------------
+  // Local state: deletion modal
+  //
+  // The pending-delete target is local component state, not Zustand global
+  // state (Slice 33 refinement: pendingDeleteProject was explicitly removed
+  // from the store). The modal reads this state and delegates the actual
+  // delete operation to useAppStore.deleteProject().
+  // ---------------------------------------------------------------------------
+  const [pendingDelete, setPendingDelete] = React.useState<{
+    filePath: string
+    title: string
+  } | null>(null)
 
   const connectedBoard = hardware.connectedBoards[0] ?? null
   const portCount = hardware.ports.length
@@ -172,14 +188,17 @@ export function Home(): React.JSX.Element {
 
               <div className="divide-y divide-border">
                 {recentProjects.map((entry) => (
-                  <button
+                  <div
                     key={entry.filePath}
-                    type="button"
-                    disabled={projectOpening}
-                    onClick={() => void handleOpenRecent(entry.filePath)}
-                    className="w-full flex items-center justify-between px-20 py-14 text-left hover:bg-surface-elevated transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="flex items-center justify-between px-20 py-14 hover:bg-surface-elevated transition-colors group"
                   >
-                    <div className="flex items-center gap-12 min-w-0">
+                    {/* Clickable open area */}
+                    <button
+                      type="button"
+                      disabled={projectOpening}
+                      onClick={() => void handleOpenRecent(entry.filePath)}
+                      className="flex-1 flex items-center gap-12 min-w-0 text-left disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
                       {projectOpening ? (
                         <Loader2 className="w-4 h-4 shrink-0 text-text-secondary animate-spin" />
                       ) : (
@@ -193,9 +212,26 @@ export function Home(): React.JSX.Element {
                           {entry.filePath}
                         </div>
                       </div>
+                    </button>
+
+                    {/* Right side: origin badge + delete */}
+                    <div className="flex items-center gap-10 ml-12 shrink-0">
+                      <Badge variant="default">{entry.origin}</Badge>
+
+                      <button
+                        type="button"
+                        id={`delete-project-btn-${entry.filePath}`}
+                        aria-label={`Delete ${entry.title}`}
+                        disabled={projectOpening}
+                        onClick={() =>
+                          setPendingDelete({ filePath: entry.filePath, title: entry.title })
+                        }
+                        className="text-disabled hover:text-error transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:pointer-events-none"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
-                    <Badge variant="default">{entry.origin}</Badge>
-                  </button>
+                  </div>
                 ))}
               </div>
             </Card>
@@ -263,6 +299,25 @@ export function Home(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {/* Delete confirmation modal — portal-mounted at the page root */}
+      <DeleteConfirmModal
+        isOpen={pendingDelete !== null}
+        projectTitle={pendingDelete?.title ?? ''}
+        onCancel={() => setPendingDelete(null)}
+        onDelete={() => deleteProject(pendingDelete?.filePath ?? '')}
+        onSuccess={() => {
+          // clearProject() has already been called by the store action for
+          // the active-project case. Close the modal — no navigation needed
+          // on the Home page (we are already here).
+          setPendingDelete(null)
+        }}
+        onError={(message) => {
+          // projectError is already set in the store. Just close the modal.
+          setPendingDelete(null)
+          console.error('[Home] Delete failed:', message)
+        }}
+      />
     </div>
   )
 }

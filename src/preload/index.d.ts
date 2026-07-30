@@ -22,7 +22,6 @@ import type {
   IProjectSaveResult,
   IProjectSaveAsRequest,
   IProjectSaveAsResult,
-  IProjectRenameRequest,
   IProjectDeleteRequest,
   IProjectDeleteResult,
   IProjectAutosaveRequest,
@@ -180,12 +179,6 @@ export interface IProjectApi {
    * live handler exists until Slice 30.
    */
   saveAs: (request: IProjectSaveAsRequest) => Promise<IProjectSaveAsResult>
-
-  /**
-   * Renames a project (updates its title and persists the full document).
-   * No live handler exists until Slice 33.
-   */
-  rename: (request: IProjectRenameRequest) => Promise<IProjectSaveResult>
 
   /**
    * Deletes a project file and its recents entry. No live handler exists

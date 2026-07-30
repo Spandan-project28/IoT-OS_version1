@@ -20,7 +20,7 @@
  *     save, saveAs    — Slice 30
  *     open, recent    — Slice 31
  *     autosave, saved — Slice 32
- *     rename, delete  — Slice 33
+ *     delete          — Slice 33
  *
  * mainWindow is accepted now so this function's signature does not need to
  * change when project:saved (Slice 32) is added — matches the
@@ -35,6 +35,7 @@
  *   project:open     → ProjectService.open() (Slice 31)
  *   project:recent   → RecentProjectsService.getAll() (Slice 31)
  *   project:autosave → ProjectService.autosave() (Slice 32)
+ *   project:delete  → ProjectService.delete() (Slice 33)
  *
  * Push channels sent here (Main → Renderer):
  *   project:saved → sent after a successful project:autosave, via mainWindow
@@ -61,6 +62,8 @@ import type {
   IProjectSaveAsRequest,
   IProjectSaveAsResult,
   IProjectAutosaveRequest,
+  IProjectDeleteRequest,
+  IProjectDeleteResult,
   IRecentProject
 } from '@shared/types/project-persistence'
 
@@ -222,6 +225,29 @@ function registerProjectIpcHandlers(mainWindow: BrowserWindow): void {
       return result
     }
   )
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:delete
+  //
+  // Permanently removes the project file from disk via ProjectService.delete().
+  // RecentProjectsService.remove() is called on both 'success' and
+  // 'file_not_found' — in either case the file is definitively gone and the
+  // stale recents entry must be cleared. Other errors (permission_denied,
+  // unknown) leave the recents entry untouched; the project might still exist
+  // and the Renderer will surface the error to the user.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(
+    ProjectIpcChannels.delete,
+    async (_event, request: IProjectDeleteRequest): Promise<IProjectDeleteResult> => {
+      const result = await ProjectService.delete(request.filePath)
+
+      if (result.status === 'success' || result.code === 'file_not_found') {
+        RecentProjectsService.remove(request.filePath)
+      }
+
+      return result
+    }
+  )
 }
 
 /**
@@ -238,6 +264,7 @@ function removeProjectIpcHandlers(): void {
   ipcMain.removeHandler(ProjectIpcChannels.open)
   ipcMain.removeHandler(ProjectIpcChannels.recent)
   ipcMain.removeHandler(ProjectIpcChannels.autosave)
+  ipcMain.removeHandler(ProjectIpcChannels.delete)
 }
 
 // ---------------------------------------------------------------------------

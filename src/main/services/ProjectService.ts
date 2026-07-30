@@ -37,12 +37,19 @@
  *   disk without requiring an intervening manual save.
  * - autosave() and flush() are new, both built entirely on the existing
  *   save() — no duplicated persistence logic.
+ *
+ * Slice 33 scope:
+ * - delete() is new: removes the project file with fs.promises.unlink(),
+ *   then attempts directory removal (fs.promises.rmdir()) — failure of the
+ *   directory step is silently swallowed (non-empty dir, Windows lock, etc.).
+ *   _pending is not modified — delete is not a persistence write.
  */
 
 import * as fs from 'fs/promises'
+import * as path from 'path'
 import type { IProjectDocument, IProjectMetadata, ProjectSchemaVersion } from '@shared/types/project'
 import type { ITemplateComponent, SupportedBoard } from '@shared/types/template'
-import type { IProjectOpenResult, IProjectSaveResult } from '@shared/types/project-persistence'
+import type { IProjectOpenResult, IProjectSaveResult, IProjectDeleteResult } from '@shared/types/project-persistence'
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -338,6 +345,47 @@ async function flush(): Promise<IProjectSaveResult | null> {
   return save(_pending.doc, _pending.path)
 }
 
+/**
+ * Permanently removes a project file from disk.
+ *
+ * Steps:
+ *   1. Verify the file exists (fs.promises.access). On ENOENT, return
+ *      file_not_found — the file is already gone, goal achieved.
+ *   2. Delete the file (fs.promises.unlink).
+ *   3. Attempt to remove the parent directory (fs.promises.rmdir). This step
+ *      is best-effort — a non-empty directory, a Windows file-lock, or any
+ *      other error here is silently swallowed. The project data is already
+ *      gone, so a leftover empty-or-not directory is not a failure.
+ *
+ * _pending is not modified — delete is not a persistence write and must not
+ * corrupt the flush() destination for the still-active project.
+ *
+ * Never throws — every failure is returned as a typed error result.
+ */
+async function deleteProject(filePath: string): Promise<IProjectDeleteResult> {
+  try {
+    await fs.access(filePath, fs.constants.F_OK)
+  } catch {
+    return { status: 'error', code: 'file_not_found', error: `File not found: ${filePath}` }
+  }
+
+  try {
+    await fs.unlink(filePath)
+  } catch (err) {
+    return {
+      status: 'error',
+      code: errorCodeForFsError(err),
+      error: `Failed to delete ${filePath}`
+    }
+  }
+
+  // Best-effort: remove the parent directory if it is now empty.
+  // Any error here (non-empty dir, OS lock, permissions) is silently ignored.
+  await fs.rmdir(path.dirname(filePath)).catch(() => void 0)
+
+  return { status: 'success' }
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -346,5 +394,6 @@ export const ProjectService = Object.freeze({
   open,
   save,
   autosave,
-  flush
+  flush,
+  delete: deleteProject
 })

@@ -4,8 +4,8 @@
  * Shared type definitions for the Project Persistence domain (Phase 7).
  *
  * This is the single source of truth for the project:* IPC contract —
- * request/result shapes for opening, saving, renaming, deleting, and
- * autosaving projects, plus the recent-projects registry entry shape.
+ * request/result shapes for opening, saving, deleting, and autosaving
+ * projects, plus the recent-projects registry entry shape.
  *
  * Architectural rules:
  * - IProjectFileDTO (the on-disk persistence shape) is intentionally NOT
@@ -114,16 +114,6 @@ export type IProjectSaveAsResult =
   | { status: 'success'; filePath: string; savedAt: string }
   | { status: 'cancelled' }
   | { status: 'error'; code: ProjectErrorCode; error: string }
-
-// ---------------------------------------------------------------------------
-// Rename
-// ---------------------------------------------------------------------------
-
-/** Request payload for the project:rename invoke channel. */
-export interface IProjectRenameRequest {
-  readonly filePath: string
-  readonly newTitle: string
-}
 
 // ---------------------------------------------------------------------------
 // Delete

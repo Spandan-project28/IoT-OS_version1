@@ -31,7 +31,6 @@ import type {
   IProjectSaveResult,
   IProjectSaveAsRequest,
   IProjectSaveAsResult,
-  IProjectRenameRequest,
   IProjectDeleteRequest,
   IProjectDeleteResult,
   IProjectAutosaveRequest,
@@ -303,7 +302,6 @@ const workspaceApi = {
 //   project.open(request)       — invoke project:open       (Slice 31)
 //   project.save(request)       — invoke project:save        (Slice 30)
 //   project.saveAs(request)     — invoke project:saveAs      (Slice 30)
-//   project.rename(request)     — invoke project:rename      (Slice 33)
 //   project.delete(request)     — invoke project:delete      (Slice 33)
 //   project.getRecent()         — invoke project:recent      (Slice 31)
 //   project.autosave(request)   — invoke project:autosave    (Slice 32)
@@ -319,9 +317,6 @@ const projectApi = {
 
   saveAs: (request: IProjectSaveAsRequest): Promise<IProjectSaveAsResult> =>
     ipcRenderer.invoke(ProjectIpcChannels.saveAs, request) as Promise<IProjectSaveAsResult>,
-
-  rename: (request: IProjectRenameRequest): Promise<IProjectSaveResult> =>
-    ipcRenderer.invoke(ProjectIpcChannels.rename, request) as Promise<IProjectSaveResult>,
 
   delete: (request: IProjectDeleteRequest): Promise<IProjectDeleteResult> =>
     ipcRenderer.invoke(ProjectIpcChannels.delete, request) as Promise<IProjectDeleteResult>,

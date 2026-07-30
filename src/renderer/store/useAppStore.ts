@@ -83,7 +83,7 @@ import type {
 import type { ITemplateDefinition } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 import type { IAIGenerateRequest } from '@shared/types/ai'
-import type { IRecentProject, IProjectSavedPayload } from '@shared/types/project-persistence'
+import type { IRecentProject, IProjectSavedPayload, IProjectDeleteResult } from '@shared/types/project-persistence'
 
 // ---------------------------------------------------------------------------
 // Safe default hardware state
@@ -426,6 +426,48 @@ export interface AppState {
    * @param firmware - The complete firmware source from Monaco's onChange.
    */
   updateFirmware: (firmware: string) => void
+
+  // -------------------------------------------------------------------------
+  // Project Management Actions (Phase 7, Slice 33)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Updates the active project's title and marks the project dirty.
+   *
+   * Immutability contract (ADR-016): constructs a new IProjectDocument via
+   * spread — every field except title is carried over unchanged.
+   *
+   * No-op guards:
+   * - currentProjectDoc is null (no active project)
+   * - newTitle trims to empty string
+   * - newTitle (trimmed) is already the current title (idempotent)
+   *
+   * Reuses the shared _scheduleAutosave(3000) helper so title edits and
+   * firmware edits follow the exact same 3-second debounce policy.
+   * An optimistic recents-list update is applied immediately; the
+   * authoritative registry update happens on the next successful autosave.
+   *
+   * @param newTitle - The new project title (will be trimmed before use).
+   */
+  updateTitle: (newTitle: string) => void
+
+  /**
+   * Deletes a project file and its recents entry via the project:delete IPC channel.
+   *
+   * Lifecycle:
+   *   1. No-op if filePath is empty.
+   *   2. Calls window.api.project.delete({ filePath }).
+   *   3a. On success: removes the entry from recentProjects. If the deleted
+   *       project is the currently active one (currentProjectPath === filePath),
+   *       delegates to clearProject() — no state duplication.
+   *   3b. On error: sets projectError to the typed error message.
+   *   3c. On IPC transport failure: captures the thrown error in projectError.
+   *
+   * Never throws into React.
+   *
+   * @param filePath - The absolute path of the project file to delete.
+   */
+  deleteProject: (filePath: string) => Promise<IProjectDeleteResult>
 
   // -------------------------------------------------------------------------
   // Project Persistence Actions (Phase 7, Slice 30)
@@ -798,6 +840,27 @@ let _projectSavedUnsubscribe: (() => void) | null = null
  */
 const AUTOSAVE_DEBOUNCE_MS = 3000
 let _autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Shared internal helper: clears any pending autosave timer and schedules a
+ * new one after `delayMs`. When the timer fires, it calls autosaveProject().
+ *
+ * Extracted so that both updateFirmware() and updateTitle() can share the
+ * exact same 3-second debounce policy without duplicating timer logic.
+ *
+ * Must only be called when currentProjectDoc is non-null — callers are
+ * responsible for this guard.
+ */
+function scheduleAutosave(delayMs: number, getStore: () => AppState): void {
+  if (_autosaveDebounceTimer !== null) {
+    clearTimeout(_autosaveDebounceTimer)
+    _autosaveDebounceTimer = null
+  }
+  _autosaveDebounceTimer = setTimeout(() => {
+    _autosaveDebounceTimer = null
+    void getStore().autosaveProject()
+  }, delayMs)
+}
 
 // ---------------------------------------------------------------------------
 // Store implementation
@@ -1334,19 +1397,80 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     })
 
-    // Autosave debounce (Slice 32): every edit resets the timer, so exactly
-    // one autosaveProject() call fires 3 seconds after the last edit — never
-    // one per keystroke, never on a fixed schedule.
-    if (_autosaveDebounceTimer !== null) {
-      clearTimeout(_autosaveDebounceTimer)
-      _autosaveDebounceTimer = null
+    // Autosave debounce (Slice 32): delegate to shared helper so firmware
+    // edits and title edits use the exact same 3-second policy.
+    if (get().currentProjectDoc) {
+      scheduleAutosave(AUTOSAVE_DEBOUNCE_MS, get)
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Project Management Actions (Phase 7, Slice 33)
+  // -------------------------------------------------------------------------
+
+  updateTitle: (newTitle: string) => {
+    const trimmed = newTitle.trim()
+    if (!trimmed) return
+
+    const { currentProjectDoc, currentProjectPath, recentProjects } = get()
+    if (!currentProjectDoc) return
+    if (trimmed === currentProjectDoc.title) return
+
+    const newDoc = { ...currentProjectDoc, title: trimmed }
+
+    // Optimistic recents update: reflect the new title immediately in the
+    // list without waiting for the next autosave. The registry on disk is
+    // updated on the next successful autosave (RecentProjectsService.push()).
+    const updatedRecents = recentProjects.map((r) =>
+      r.filePath === currentProjectPath ? { ...r, title: trimmed } : r
+    )
+
+    set({
+      currentProjectDoc: newDoc,
+      projectDirty: true,
+      recentProjects: updatedRecents
+    })
+
+    // Reuse the shared 3-second debounce — same policy as firmware edits.
+    scheduleAutosave(AUTOSAVE_DEBOUNCE_MS, get)
+  },
+
+  deleteProject: async (filePath: string): Promise<IProjectDeleteResult> => {
+    if (!filePath) return { status: 'error', code: 'unknown', error: 'No file path provided.' }
+
+    if (!window.api?.project) {
+      const err: IProjectDeleteResult = {
+        status: 'error',
+        code: 'unknown',
+        error: 'Project API is not available.'
+      }
+      set({ projectError: err.error })
+      return err
     }
 
-    if (get().currentProjectDoc) {
-      _autosaveDebounceTimer = setTimeout(() => {
-        _autosaveDebounceTimer = null
-        void get().autosaveProject()
-      }, AUTOSAVE_DEBOUNCE_MS)
+    try {
+      const result = await window.api.project.delete({ filePath })
+
+      if (result.status === 'success') {
+        // Remove from the in-memory recents list immediately.
+        set((state) => ({
+          recentProjects: state.recentProjects.filter((r) => r.filePath !== filePath)
+        }))
+
+        // If the deleted project is the currently active one, reset all
+        // active-project state via clearProject() — no duplication.
+        if (get().currentProjectPath === filePath) {
+          get().clearProject()
+        }
+      } else {
+        set({ projectError: result.error })
+      }
+
+      return result
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Delete failed unexpectedly.'
+      set({ projectError: message })
+      return { status: 'error', code: 'unknown', error: message }
     }
   },
 
