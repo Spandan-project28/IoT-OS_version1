@@ -76,6 +76,7 @@ import type {
   IRecentProject
 } from './project-persistence'
 import type { IWorkspaceInfo } from './workspace'
+import type { IAiSettingsConfig, IAiSettingsSaveRequest, ISettingsSaveResult } from './settings'
 
 // ---------------------------------------------------------------------------
 // Hardware channels
@@ -488,3 +489,57 @@ export type ProjectRecentResult = IRecentProject[]
 
 /** Payload pushed on the project:saved channel. */
 export type ProjectSavedPayload = IProjectSavedPayload
+
+// ---------------------------------------------------------------------------
+// Settings channels (Phase 8, Slice 35)
+// ---------------------------------------------------------------------------
+
+/**
+ * IPC channel names for the Settings subsystem.
+ *
+ * Intentionally separate from AiIpcChannels — the Settings domain is
+ * independent of the AI generation domain. Coordination between the two
+ * (resolving persisted AI settings for a generation request) happens inside
+ * aiIpcHandlers.ts, not via a shared channel group.
+ *
+ * Both channels are Renderer → Main invoke calls. No push events.
+ *
+ * Usage (Main):
+ *   ipcMain.handle(SettingsIpcChannels.getAiConfig, () => SettingsService.getAiConfig())
+ *
+ * Usage (Preload):
+ *   ipcRenderer.invoke(SettingsIpcChannels.getAiConfig)
+ *
+ * Usage (Renderer):
+ *   window.api.settings.getAiConfig()
+ */
+export const SettingsIpcChannels = Object.freeze({
+  /**
+   * Renderer → Main (invoke).
+   * Returns the sanitized, Renderer-safe AI provider configuration. Never
+   * includes the raw API key.
+   * Response: IAiSettingsConfig
+   */
+  getAiConfig: 'settings:getAiConfig' as const,
+
+  /**
+   * Renderer → Main (invoke).
+   * Persists the given AI provider configuration.
+   * Request:  IAiSettingsSaveRequest
+   * Response: ISettingsSaveResult
+   */
+  saveAiConfig: 'settings:saveAiConfig' as const
+} as const)
+
+// ---------------------------------------------------------------------------
+// Settings payload type aliases
+// ---------------------------------------------------------------------------
+
+/** Response payload for the settings:getAiConfig invoke channel. */
+export type SettingsGetAiConfigResult = IAiSettingsConfig
+
+/** Request payload for the settings:saveAiConfig invoke channel. */
+export type SettingsSaveAiConfigRequest = IAiSettingsSaveRequest
+
+/** Response payload for the settings:saveAiConfig invoke channel. */
+export type SettingsSaveAiConfigResult = ISettingsSaveResult

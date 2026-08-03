@@ -64,10 +64,14 @@
  *   Renderer. The Renderer only ever receives IAIResult.
  * - Metadata (origin, createdAt, generator, provider, model) is populated
  *   here and is immutable once set (ADR-016).
- * - Chooses MockAIClient when AI_API_KEY is absent or AI_PROVIDER === 'mock'.
+ * - Chooses MockAIClient when no API key is resolvable (from an environment
+ *   variable or persisted settings) or AI_PROVIDER === 'mock'.
+ * - Never reads SettingsService directly (Phase 8, Slice 35) — the resolved
+ *   persisted settings are passed in by aiIpcHandlers.ts, the sole
+ *   coordination point between the AI and Settings domains.
  *
  * Public API:
- * - generate(request) → IAIResult   (never throws)
+ * - generate(request, persisted) → IAIResult   (never throws)
  */
 
 import { PromptBuilder, PROMPT_VERSION } from './PromptBuilder'
@@ -78,6 +82,7 @@ import { ResponseValidator } from './ResponseValidator'
 import { nanoid } from 'nanoid'
 import type { IAIGenerateRequest, IAIProviderConfig, IAIResult } from '@shared/types/ai'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
+import type { IResolvedAiSettings } from '@shared/types/settings'
 
 // ---------------------------------------------------------------------------
 // Environment variable names
@@ -106,30 +111,43 @@ const DEFAULT_MAX_TOKENS = 4096
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves IAIProviderConfig from environment variables.
+ * Resolves IAIProviderConfig from environment variables and/or persisted
+ * settings (Phase 8, Slice 35).
  *
- * All values are read from process.env at call time. For V0.1 (Electron), env
- * vars are set at process start and do not change at runtime, so this is
- * equivalent to reading them once at module load.
+ * Precedence per field: environment variable (if set) → persisted setting
+ * (if set) → hardcoded default. apiKey has no hardcoded default — if
+ * neither an environment variable nor a persisted setting supplies one,
+ * this returns null, signalling to the caller that MockAIClient should be
+ * used. This preserves the pre-Slice-35 developer workflow: an environment
+ * variable always takes precedence over whatever is saved in Settings.
  *
- * Returns null when AI_API_KEY is absent — signals to the caller that
- * MockAIClient should be used.
+ * `persisted` is supplied by the caller (aiIpcHandlers.ts), which fetches it
+ * from SettingsService — this function never reads SettingsService itself.
+ *
+ * timeoutMs / temperature / maxTokens remain environment-variable/default
+ * only, unchanged by Slice 35 — they are not part of the persisted Settings
+ * surface (see settings.ts's IResolvedAiSettings).
  */
-function resolveProviderConfig(): IAIProviderConfig | null {
-  const apiKey = process.env[ENV_API_KEY]
+function resolveProviderConfig(persisted: IResolvedAiSettings | null): IAIProviderConfig | null {
+  const envApiKey = process.env[ENV_API_KEY]
+  const apiKey =
+    envApiKey && envApiKey.trim() !== '' ? envApiKey.trim() : persisted?.apiKey
 
-  if (!apiKey || apiKey.trim() === '') {
+  if (!apiKey) {
     return null
   }
 
-  const apiUrl = (process.env[ENV_API_URL] ?? DEFAULT_API_URL).replace(/\/$/, '')
-  const model = process.env[ENV_MODEL] ?? DEFAULT_MODEL
+  const apiUrl = (process.env[ENV_API_URL] ?? persisted?.apiUrl ?? DEFAULT_API_URL).replace(
+    /\/$/,
+    ''
+  )
+  const model = process.env[ENV_MODEL] ?? persisted?.model ?? DEFAULT_MODEL
   const timeoutMs = parseEnvInt(process.env[ENV_TIMEOUT_MS], DEFAULT_TIMEOUT_MS)
   const temperature = parseEnvFloat(process.env[ENV_TEMPERATURE], DEFAULT_TEMPERATURE)
   const maxTokens = parseEnvInt(process.env[ENV_MAX_TOKENS], DEFAULT_MAX_TOKENS)
 
   return {
-    apiKey: apiKey.trim(),
+    apiKey,
     apiUrl,
     model,
     timeoutMs,
@@ -211,16 +229,25 @@ function mapToProjectDocument(
  * The outer try/catch is a last-resort guard — every step returns a typed
  * result rather than throwing, so this guard should never fire in practice.
  *
- * @param request - The IAIGenerateRequest received from the Renderer via IPC.
+ * @param request   - The IAIGenerateRequest received from the Renderer via IPC.
+ * @param persisted - The resolved persisted AI settings (Phase 8, Slice 35),
+ *   fetched by aiIpcHandlers.ts from SettingsService and passed through
+ *   unchanged. Null if no settings are persisted (or no key is stored) —
+ *   in that case only environment variables (and the mock fallback) apply,
+ *   exactly as before Slice 35.
  * @returns IAIResult — never throws.
  */
-async function generate(request: IAIGenerateRequest): Promise<IAIResult> {
+async function generate(
+  request: IAIGenerateRequest,
+  persisted: IResolvedAiSettings | null
+): Promise<IAIResult> {
   try {
     // Step 1: Resolve provider configuration.
     // effectiveMock is true when:
-    //   - AI_API_KEY is absent or empty (no real provider configured), OR
+    //   - Neither an environment variable nor a persisted setting supplies
+    //     an API key (no real provider configured), OR
     //   - AI_PROVIDER is explicitly set to 'mock' (developer override).
-    const config = resolveProviderConfig()
+    const config = resolveProviderConfig(persisted)
     const effectiveMock = config === null || process.env[ENV_PROVIDER] === 'mock'
 
     // Step 2: Build prompt

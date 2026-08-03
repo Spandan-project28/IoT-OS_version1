@@ -9,11 +9,18 @@
  * are rendered through exactly the same pipeline.
  *
  * State consumed from Zustand:
- * - currentProjectDoc : IProjectDocument | null — the active project data source
- * - aiLoading         : boolean                 — true while generation is in progress
- * - aiError           : string | null            — error from last failed generation
- * - generateAiProject : action                  — the only permitted path to window.api.ai
- * - hardware          : IHardwareState           — used to derive the boardHint for the request
+ * - currentProjectDoc  : IProjectDocument | null — the active project data source
+ * - aiLoading          : boolean                 — true while generation is in progress
+ * - aiError            : string | null            — error from last failed generation
+ * - aiErrorCode        : AIErrorCode | null       — structured error code (Phase 8, Slice 35);
+ *                                                    drives the "Go to Settings" link
+ * - pendingAiCandidate : IProjectDocument | null — a successful generation awaiting explicit
+ *                                                   Accept/Discard (Phase 8, Slice 36); never
+ *                                                   applied to currentProjectDoc automatically
+ * - generateAiProject  : action                  — the only permitted path to window.api.ai
+ * - acceptAiCandidate  : action                  — applies pendingAiCandidate to currentProjectDoc
+ * - discardAiCandidate : action                  — discards pendingAiCandidate without applying it
+ * - hardware           : IHardwareState           — used to derive the boardHint for the request
  *
  * Architectural rules:
  * - window.api.ai is NEVER called from this component.
@@ -39,7 +46,9 @@ import {
   XCircle
 } from 'lucide-react'
 import React from 'react'
-import type { IAIGenerateRequest } from '@shared/types/ai'
+import { NavLink } from 'react-router-dom'
+import type { IAIGenerateRequest, AIErrorCode } from '@shared/types/ai'
+import type { IProjectDocument } from '@shared/types/project'
 
 // ---------------------------------------------------------------------------
 // AssistantSection — reusable info card
@@ -100,6 +109,62 @@ function AssistantSectionSkeleton(): React.JSX.Element {
 }
 
 // ---------------------------------------------------------------------------
+// ProjectDetailSections — components/wiring/how-it-works/expected-output
+//
+// Extracted (Phase 8, Slice 36) so the same rendering can be reused for both
+// the active project (currentProjectDoc) and a pending AI candidate awaiting
+// review (pendingAiCandidate) without duplicating this block. Purely
+// presentational — renders identically to the previously-inline version for
+// any IProjectDocument.
+// ---------------------------------------------------------------------------
+
+function ProjectDetailSections({ document }: { document: IProjectDocument }): React.JSX.Element {
+  return (
+    <>
+      {/* Components list */}
+      {document.components.length > 0 && (
+        <AssistantSection icon={<Cpu className="w-6 h-6" />} title="Components">
+          <ul className="flex flex-col gap-8">
+            {document.components.map((component, index) => (
+              <li key={index} className="flex items-start gap-8">
+                <CheckSquare className="w-4 h-4 text-primary mt-[2px] shrink-0" />
+                <div>
+                  <span className="font-medium text-text-primary">
+                    {component.quantity}× {component.name}
+                  </span>
+                  {component.notes && (
+                    <div className="text-[12px] text-text-secondary mt-2">{component.notes}</div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </AssistantSection>
+      )}
+
+      {/* Wiring */}
+      {document.wiring && (
+        <AssistantSection icon={<Cable className="w-6 h-6" />} title="Wiring">
+          <span className="whitespace-pre-line">{document.wiring}</span>
+        </AssistantSection>
+      )}
+
+      {/* How it works / explanation */}
+      {document.explanation && (
+        <AssistantSection icon={<Code2 className="w-6 h-6" />} title="How It Works">
+          <span className="whitespace-pre-line">{document.explanation}</span>
+        </AssistantSection>
+      )}
+
+      {/* Expected output */}
+      <AssistantSection icon={<BookOpen className="w-6 h-6" />} title="Expected Output">
+        <span className="whitespace-pre-line">{document.expectedOutput}</span>
+      </AssistantSection>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // PromptInput — the AI generation form
 //
 // Reads aiLoading/aiError from the store. Calls generateAiProject through
@@ -111,19 +176,34 @@ interface PromptInputProps {
   onGenerate: (request: IAIGenerateRequest) => void
   isLoading: boolean
   error: string | null
+  /**
+   * Structured error code from the last failed generation (Phase 8, Slice 35).
+   * Drives the conditional "Go to Settings" link below the error banner for
+   * 'not_configured' / 'invalid_api_key' — the two codes a misconfigured or
+   * missing AI provider can surface.
+   */
+  errorCode: AIErrorCode | null
+  /**
+   * True while a generated candidate is pending review (Phase 8, Slice 36).
+   * Distinct from isLoading — nothing is in flight, but a new generation
+   * must not start until the pending candidate is accepted or discarded.
+   */
+  disabled: boolean
 }
 
 function PromptInput({
   boardHint,
   onGenerate,
   isLoading,
-  error
+  error,
+  errorCode,
+  disabled
 }: PromptInputProps): React.JSX.Element {
   const [prompt, setPrompt] = React.useState('')
 
   function handleGenerate(): void {
     const trimmed = prompt.trim()
-    if (!trimmed || isLoading) return
+    if (!trimmed || isLoading || disabled) return
 
     const request: IAIGenerateRequest = {
       prompt: trimmed,
@@ -143,7 +223,7 @@ function PromptInput({
     }
   }
 
-  const canSubmit = prompt.trim().length > 0 && !isLoading
+  const canSubmit = prompt.trim().length > 0 && !isLoading && !disabled
 
   return (
     <div className="flex flex-col gap-12 p-20 rounded-2xl bg-surface border-2 border-primary/20 shadow-sm relative overflow-hidden">
@@ -162,7 +242,7 @@ function PromptInput({
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onKeyDown={handleKeyDown}
-        disabled={isLoading}
+        disabled={isLoading || disabled}
         placeholder={
           'e.g. "Blink an LED every 500ms on pin 13" or "Read temperature from DHT11 and send to Serial Monitor"'
         }
@@ -179,9 +259,16 @@ function PromptInput({
 
       {/* Error banner */}
       {error && !isLoading && (
-        <div className="flex items-start gap-10 px-14 py-10 rounded-xl bg-error/10 border border-error/20 text-error text-[13px]">
-          <XCircle className="w-4 h-4 shrink-0 mt-[1px]" />
-          <span className="leading-relaxed">{error}</span>
+        <div className="flex flex-col gap-8 px-14 py-10 rounded-xl bg-error/10 border border-error/20 text-error text-[13px]">
+          <div className="flex items-start gap-10">
+            <XCircle className="w-4 h-4 shrink-0 mt-[1px]" />
+            <span className="leading-relaxed">{error}</span>
+          </div>
+          {(errorCode === 'not_configured' || errorCode === 'invalid_api_key') && (
+            <NavLink to="/settings" className="ml-14 underline hover:no-underline w-fit">
+              Go to Settings
+            </NavLink>
+          )}
         </div>
       )}
 
@@ -225,8 +312,18 @@ function PromptInput({
 // ---------------------------------------------------------------------------
 
 export function Editor(): React.JSX.Element {
-  const { currentProjectDoc, aiLoading, aiError, generateAiProject, hardware, updateFirmware } =
-    useAppStore()
+  const {
+    currentProjectDoc,
+    aiLoading,
+    aiError,
+    aiErrorCode,
+    pendingAiCandidate,
+    acceptAiCandidate,
+    discardAiCandidate,
+    generateAiProject,
+    hardware,
+    updateFirmware
+  } = useAppStore()
 
   // Derive the board hint from the connected board, if any.
   // IBoard.type is 'arduino' | 'esp32' | 'unknown'. We map it to the SupportedBoard
@@ -336,6 +433,8 @@ export function Editor(): React.JSX.Element {
               onGenerate={generateAiProject}
               isLoading={aiLoading}
               error={aiError}
+              errorCode={aiErrorCode}
+              disabled={pendingAiCandidate !== null}
             />
 
             {aiLoading ? (
@@ -345,6 +444,40 @@ export function Editor(): React.JSX.Element {
                 <AssistantSectionSkeleton />
                 <AssistantSectionSkeleton />
                 <AssistantSectionSkeleton />
+              </>
+            ) : pendingAiCandidate ? (
+              /* Pending AI candidate — awaiting explicit Accept/Discard
+                 (Phase 8, Slice 36). currentProjectDoc is deliberately not
+                 rendered here; the candidate has not been applied yet. */
+              <>
+                <AssistantSection
+                  icon={<Sparkles className="w-6 h-6" />}
+                  title={pendingAiCandidate.title}
+                  highlighted
+                >
+                  {pendingAiCandidate.description}
+                </AssistantSection>
+
+                <ProjectDetailSections document={pendingAiCandidate} />
+
+                <div className="flex items-center gap-12">
+                  <button
+                    id="ai-candidate-accept-btn"
+                    onClick={acceptAiCandidate}
+                    className="flex-1 flex items-center justify-center gap-8 px-16 py-10 rounded-lg text-[13px] font-semibold bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md transition-all duration-200"
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    Accept
+                  </button>
+                  <button
+                    id="ai-candidate-discard-btn"
+                    onClick={discardAiCandidate}
+                    className="flex-1 flex items-center justify-center gap-8 px-16 py-10 rounded-lg text-[13px] font-semibold bg-surface-elevated text-text-primary border border-border hover:bg-border/50 transition-all duration-200"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    Discard
+                  </button>
+                </div>
               </>
             ) : currentProjectDoc ? (
               /* Project content — rendered from currentProjectDoc regardless of origin */
@@ -358,47 +491,7 @@ export function Editor(): React.JSX.Element {
                   {currentProjectDoc.description}
                 </AssistantSection>
 
-                {/* Components list */}
-                {currentProjectDoc.components.length > 0 && (
-                  <AssistantSection icon={<Cpu className="w-6 h-6" />} title="Components">
-                    <ul className="flex flex-col gap-8">
-                      {currentProjectDoc.components.map((component, index) => (
-                        <li key={index} className="flex items-start gap-8">
-                          <CheckSquare className="w-4 h-4 text-primary mt-[2px] shrink-0" />
-                          <div>
-                            <span className="font-medium text-text-primary">
-                              {component.quantity}× {component.name}
-                            </span>
-                            {component.notes && (
-                              <div className="text-[12px] text-text-secondary mt-2">
-                                {component.notes}
-                              </div>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </AssistantSection>
-                )}
-
-                {/* Wiring */}
-                {currentProjectDoc.wiring && (
-                  <AssistantSection icon={<Cable className="w-6 h-6" />} title="Wiring">
-                    <span className="whitespace-pre-line">{currentProjectDoc.wiring}</span>
-                  </AssistantSection>
-                )}
-
-                {/* How it works / explanation */}
-                {currentProjectDoc.explanation && (
-                  <AssistantSection icon={<Code2 className="w-6 h-6" />} title="How It Works">
-                    <span className="whitespace-pre-line">{currentProjectDoc.explanation}</span>
-                  </AssistantSection>
-                )}
-
-                {/* Expected output */}
-                <AssistantSection icon={<BookOpen className="w-6 h-6" />} title="Expected Output">
-                  <span className="whitespace-pre-line">{currentProjectDoc.expectedOutput}</span>
-                </AssistantSection>
+                <ProjectDetailSections document={currentProjectDoc} />
               </>
             ) : (
               /* Empty state placeholder sections — no project open */

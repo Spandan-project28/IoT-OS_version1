@@ -14,7 +14,8 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     disposeSerial,
     loadRecentProjects,
     initializeProjectSync,
-    disposeProjectSync
+    disposeProjectSync,
+    loadAiConfig
   } = useAppStore()
 
   useEffect(() => {
@@ -27,6 +28,9 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     // other saveType) is reflected in the store regardless of which action
     // triggered the write.
     initializeProjectSync()
+    // Phase 8, Slice 35: one-time load of the persisted AI provider
+    // configuration, matching loadRecentProjects()'s lifecycle exactly.
+    void loadAiConfig()
     return () => {
       disposeHardware()
       disposeSerial()
@@ -39,7 +43,8 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     disposeSerial,
     loadRecentProjects,
     initializeProjectSync,
-    disposeProjectSync
+    disposeProjectSync,
+    loadAiConfig
   ])
 
   // ---------------------------------------------------------------------------

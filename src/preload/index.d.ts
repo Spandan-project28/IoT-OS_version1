@@ -29,6 +29,11 @@ import type {
   IRecentProject
 } from '@shared/types/project-persistence'
 import type { IWorkspaceInfo } from '@shared/types/workspace'
+import type {
+  IAiSettingsConfig,
+  IAiSettingsSaveRequest,
+  ISettingsSaveResult
+} from '@shared/types/settings'
 
 /**
  * IApi
@@ -207,6 +212,22 @@ export interface IProjectApi {
   onSaved: (callback: (payload: IProjectSavedPayload) => void) => () => void
 }
 
+export interface ISettingsApi {
+  /**
+   * Returns the sanitized, Renderer-safe AI provider configuration.
+   * Never includes the raw API key — only hasApiKey.
+   */
+  getAiConfig: () => Promise<IAiSettingsConfig>
+
+  /**
+   * Persists the given AI provider configuration.
+   * Returns { status: 'success' } on success or a typed error on failure.
+   * See IAiSettingsSaveRequest.apiKey's doc comment for its
+   * unchanged/clear/set semantics.
+   */
+  saveAiConfig: (request: IAiSettingsSaveRequest) => Promise<ISettingsSaveResult>
+}
+
 export interface IApi {
   hardware: IHardwareApi
   upload: IUploadApi
@@ -214,6 +235,7 @@ export interface IApi {
   ai: IAiApi
   project: IProjectApi
   workspace: IWorkspaceApi
+  settings: ISettingsApi
 }
 
 declare global {

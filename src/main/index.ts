@@ -11,6 +11,7 @@ import { uploadIpcHandlers } from './ipc/uploadIpcHandlers'
 import { serialIpcHandlers } from './ipc/serialIpcHandlers'
 import { aiIpcHandlers } from './ipc/aiIpcHandlers'
 import { projectIpcHandlers } from './ipc/projectIpcHandlers'
+import { settingsIpcHandlers } from './ipc/settingsIpcHandlers'
 import { WorkspaceService } from './services/WorkspaceService'
 import { ProjectService } from './services/ProjectService'
 
@@ -113,6 +114,11 @@ app.whenReady().then(async () => {
   // added in Slice 32.
   projectIpcHandlers.register(mainWindow)
 
+  // Settings handlers are invoke/response only — no push events, no window
+  // reference needed. No ordering constraint relative to the other five
+  // handler groups (Phase 8, Slice 35).
+  settingsIpcHandlers.register()
+
   // Step 4: Start hardware discovery (async — does not block window display).
   HardwareManager.start().catch((err: unknown) => {
     console.error('[HardwareManager] Failed to start hardware discovery:', err)
@@ -129,6 +135,7 @@ app.whenReady().then(async () => {
       serialIpcHandlers.register(newWindow)
       aiIpcHandlers.register()
       projectIpcHandlers.register(newWindow)
+      settingsIpcHandlers.register()
     }
   })
 })
@@ -173,6 +180,9 @@ app.on('will-quit', () => {
   // removal is a simple deregister. WorkspaceService holds no OS handles and
   // needs no explicit stop() call.
   projectIpcHandlers.remove()
+  // Settings handlers have no sessions or OS resources — removal is a
+  // simple deregister (Phase 8, Slice 35).
+  settingsIpcHandlers.remove()
 })
 
 // Quit when all windows are closed, except on macOS. There, it's common

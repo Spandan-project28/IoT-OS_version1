@@ -6,7 +6,8 @@ import {
   SerialIpcChannels,
   AiIpcChannels,
   ProjectIpcChannels,
-  WorkspaceIpcChannels
+  WorkspaceIpcChannels,
+  SettingsIpcChannels
 } from '@shared/types/ipc'
 import type { IHardwareState } from '@shared/types/hardware'
 import type {
@@ -38,6 +39,11 @@ import type {
   IRecentProject
 } from '@shared/types/project-persistence'
 import type { IWorkspaceInfo } from '@shared/types/workspace'
+import type {
+  IAiSettingsConfig,
+  IAiSettingsSaveRequest,
+  ISettingsSaveResult
+} from '@shared/types/settings'
 
 // ---------------------------------------------------------------------------
 // Hardware API
@@ -344,10 +350,42 @@ const projectApi = {
 }
 
 // ---------------------------------------------------------------------------
-// Composed API surface
+// Settings API
 //
-// All future subsystems (settings) will be added here as additional
-// namespaced objects when their IPC slices are implemented.
+// Exposes a minimal, typed bridge for the Settings subsystem (Phase 8,
+// Slice 35).
+//
+// Architectural rules:
+// - Thin bridge only — no business logic.
+// - Both methods are invoke/response (no push events).
+// - Types flow from @shared/types/settings — no duplication.
+// - getAiConfig() never returns the raw API key. saveAiConfig() never
+//   requires it to be resent — see IAiSettingsSaveRequest.apiKey's doc
+//   comment for its unchanged/clear/set semantics.
+//
+// Channels:
+//   settings.getAiConfig()        — invoke settings:getAiConfig
+//   settings.saveAiConfig(request) — invoke settings:saveAiConfig
+// ---------------------------------------------------------------------------
+
+const settingsApi = {
+  /**
+   * Returns the sanitized, Renderer-safe AI provider configuration.
+   * Never includes the raw API key — only hasApiKey.
+   */
+  getAiConfig: (): Promise<IAiSettingsConfig> =>
+    ipcRenderer.invoke(SettingsIpcChannels.getAiConfig) as Promise<IAiSettingsConfig>,
+
+  /**
+   * Persists the given AI provider configuration.
+   * Returns { status: 'success' } on success or a typed error on failure.
+   */
+  saveAiConfig: (request: IAiSettingsSaveRequest): Promise<ISettingsSaveResult> =>
+    ipcRenderer.invoke(SettingsIpcChannels.saveAiConfig, request) as Promise<ISettingsSaveResult>
+}
+
+// ---------------------------------------------------------------------------
+// Composed API surface
 // ---------------------------------------------------------------------------
 
 const api = {
@@ -356,7 +394,8 @@ const api = {
   serial: serialApi,
   ai: aiApi,
   project: projectApi,
-  workspace: workspaceApi
+  workspace: workspaceApi,
+  settings: settingsApi
 }
 
 // ---------------------------------------------------------------------------

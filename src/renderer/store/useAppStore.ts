@@ -82,8 +82,9 @@ import type {
 } from '@shared/types/serial'
 import type { ITemplateDefinition } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
-import type { IAIGenerateRequest } from '@shared/types/ai'
+import type { IAIGenerateRequest, AIErrorCode } from '@shared/types/ai'
 import type { IRecentProject, IProjectSavedPayload, IProjectDeleteResult } from '@shared/types/project-persistence'
+import type { IAiSettingsConfig, IAiSettingsSaveRequest, ISettingsSaveResult } from '@shared/types/settings'
 
 // ---------------------------------------------------------------------------
 // Safe default hardware state
@@ -165,6 +166,49 @@ export interface AppState {
    * Also cleared by clearProject().
    */
   aiError: string | null
+
+  /**
+   * Structured error code from the last failed generateAiProject() call
+   * (Phase 8, Slice 35).
+   *
+   * Null on startup, cleared at the start of each new generateAiProject()
+   * call (including the API-unavailable guard branch), and set alongside
+   * aiError whenever AIService returns a typed IAIResult { status: 'error' }.
+   * Left null after an IPC transport failure, since transport failures have
+   * no AIErrorCode.
+   *
+   * Allows the UI to branch on error category (e.g. offering a link to
+   * Settings for 'not_configured' / 'invalid_api_key') without parsing
+   * aiError's message string.
+   */
+  aiErrorCode: AIErrorCode | null
+
+  /**
+   * The most recent successful AI generation result, awaiting explicit user
+   * confirmation before it can replace currentProjectDoc (Phase 8, Slice 36).
+   *
+   * Null until generateAiProject() succeeds. Populated instead of writing
+   * directly to currentProjectDoc — closes the data-loss bug where a
+   * successful generation would silently overwrite an active, dirty,
+   * unsaved project. Cleared by acceptAiCandidate(), discardAiCandidate(),
+   * or whenever the active project identity changes (clearProject(),
+   * selectTemplate(), openProject()) — a candidate generated against one
+   * project must never be accepted onto a different, subsequently active
+   * one.
+   */
+  pendingAiCandidate: IProjectDocument | null
+
+  /**
+   * The kind of pending candidate, or null when none is pending.
+   *
+   * 'new' is the only value this slice ever produces (a fresh generation).
+   * 'improve' is reserved for a future slice — introducing the member now
+   * only, with no branching logic for it yet, avoids a breaking type change
+   * later without implementing anything beyond this slice's scope.
+   *
+   * Non-null if and only if pendingAiCandidate is non-null.
+   */
+  pendingAiCandidateMode: 'new' | null
 
   /**
    * True once the active project has unsaved edits.
@@ -258,6 +302,38 @@ export interface AppState {
    * operations with separate state, never shared.
    */
   projectOpenError: string | null
+
+  // -------------------------------------------------------------------------
+  // AI Configuration State (Phase 8, Slice 35)
+  //
+  // Persisted AI provider configuration (apiUrl, model, whether an API key
+  // is stored). The raw API key itself is never present in this state —
+  // SettingsService never transmits it to the Renderer (mirrors
+  // IAIProviderConfig's existing Main-process-only rule).
+  // -------------------------------------------------------------------------
+
+  /**
+   * The persisted AI provider configuration, as last loaded from or saved
+   * to SettingsService. Null until loadAiConfig() resolves for the first
+   * time.
+   */
+  aiConfig: IAiSettingsConfig | null
+
+  /** True while loadAiConfig() is awaiting the IPC response. */
+  aiConfigLoading: boolean
+
+  /** True while saveAiConfig() is awaiting the IPC response. */
+  aiConfigSaving: boolean
+
+  /**
+   * Human-readable error message from the last failed saveAiConfig() call.
+   *
+   * Null on startup and cleared at the start of each new saveAiConfig()
+   * call. loadAiConfig() never sets this — a failed load silently leaves
+   * aiConfig at its previous value, matching loadRecentProjects()'s
+   * convention.
+   */
+  aiConfigError: string | null
 
   // -------------------------------------------------------------------------
   // Hardware State (Phase 2, Slice 6)
@@ -409,6 +485,75 @@ export interface AppState {
    * indicator should remain until the operation completes.
    */
   clearProject: () => void
+
+  // -------------------------------------------------------------------------
+  // AI Candidate Review Actions (Phase 8, Slice 36)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Accepts the pending AI candidate, replacing currentProjectDoc with it.
+   *
+   * No-op if pendingAiCandidate is null.
+   *
+   * Cancels any pending autosave debounce first — the active project is
+   * about to change, so a timer scheduled against the outgoing project must
+   * never fire against the newly accepted one.
+   *
+   * Sets currentProjectDoc to the candidate, projectDirty = false,
+   * currentProjectPath = null — identical to the values generateAiProject()
+   * used to set directly before this slice. Clears pendingAiCandidate and
+   * pendingAiCandidateMode.
+   *
+   * Pure synchronous action. No IPC. No side effects beyond the store.
+   */
+  acceptAiCandidate: () => void
+
+  /**
+   * Discards the pending AI candidate without applying it.
+   *
+   * No-op if pendingAiCandidate is null. Touches nothing except
+   * pendingAiCandidate and pendingAiCandidateMode — currentProjectDoc,
+   * projectDirty, currentProjectPath, and any running autosave debounce are
+   * left completely untouched.
+   *
+   * Pure synchronous action. No IPC. No side effects beyond the store.
+   */
+  discardAiCandidate: () => void
+
+  // -------------------------------------------------------------------------
+  // AI Configuration Actions (Phase 8, Slice 35)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Loads the persisted AI provider configuration into aiConfig.
+   *
+   * Called once, from AppProviders.tsx's mount effect, matching
+   * loadRecentProjects()'s lifecycle exactly.
+   *
+   * Never throws into React — a transport failure silently leaves aiConfig
+   * at its previous value (null on first load).
+   */
+  loadAiConfig: () => Promise<void>
+
+  /**
+   * Saves the given AI provider configuration via SettingsService.
+   *
+   * Lifecycle:
+   *   1. Sets aiConfigSaving = true and clears aiConfigError.
+   *   2. Calls window.api.settings.saveAiConfig(request).
+   *   3a. On success: re-fetches aiConfig via loadAiConfig() so hasApiKey
+   *       reflects the authoritative Main-process state, rather than being
+   *       computed locally from request.apiKey's unchanged/clear/set meaning.
+   *   3b. On error: sets aiConfigError to the typed error message.
+   *   3c. On IPC transport failure: captures the thrown error in
+   *       aiConfigError.
+   *   4. Always sets aiConfigSaving = false in finally.
+   *
+   * Never throws into React. Returns the typed result so the caller (the
+   * Settings page) can react directly, matching deleteProject()'s existing
+   * return-value convention.
+   */
+  saveAiConfig: (request: IAiSettingsSaveRequest) => Promise<ISettingsSaveResult>
 
   // -------------------------------------------------------------------------
   // Firmware Editing Actions (Phase 7, Slice 29)
@@ -903,6 +1048,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentProjectDoc: null,
   aiLoading: false,
   aiError: null,
+  aiErrorCode: null,
+  pendingAiCandidate: null,
+  pendingAiCandidateMode: null,
   projectDirty: false,
   currentProjectPath: null,
   projectSaving: false,
@@ -912,6 +1060,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   recentProjects: [],
   projectOpening: false,
   projectOpenError: null,
+
+  // -------------------------------------------------------------------------
+  // AI Configuration State initial values (Phase 8, Slice 35)
+  // -------------------------------------------------------------------------
+
+  aiConfig: null,
+  aiConfigLoading: false,
+  aiConfigSaving: false,
+  aiConfigError: null,
 
   // -------------------------------------------------------------------------
   // Hardware State initial values
@@ -1280,16 +1437,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   // -------------------------------------------------------------------------
 
   generateAiProject: async (request: IAIGenerateRequest) => {
+    // Guard: a candidate is already pending review — must be resolved
+    // (accepted or discarded) before a new generation can start. Checked
+    // here, not only via the disabled UI control, so this can never be
+    // bypassed by a stray programmatic call (Phase 8, Slice 36).
+    if (get().pendingAiCandidate) return
+
     // Guard: preload bridge must be available
     if (!window.api?.ai) {
-      set({ aiError: 'AI API is not available.', aiLoading: false })
+      set({ aiError: 'AI API is not available.', aiErrorCode: null, aiLoading: false })
       return
     }
 
     // Step 1: Set loading state and clear the previous error.
     // Matches the async lifecycle used by compileFirmware, uploadFirmware,
     // openSerial, etc.
-    set({ aiLoading: true, aiError: null })
+    set({ aiLoading: true, aiError: null, aiErrorCode: null })
 
     try {
       // Step 2: Delegate to the preload bridge — AIService runs the full
@@ -1298,19 +1461,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await window.api.ai.generate(request)
 
       if (result.status === 'success') {
-        // The active project is changing — cancel any pending autosave
-        // debounce so it can never fire against the project being
-        // generated now.
-        cancelPendingAutosave()
-
-        // Step 3a: Store the returned document as the active project.
-        // Atomic replacement — never mutates the previous instance (ADR-016).
-        // A freshly generated project is never dirty and has no saved path.
-        set({ currentProjectDoc: result.project, projectDirty: false, currentProjectPath: null })
+        // Step 3a: Store the result as a pending candidate awaiting explicit
+        // user confirmation (Phase 8, Slice 36) — currentProjectDoc is
+        // deliberately left untouched here, so an active, dirty, unsaved
+        // project (and any autosave debounce already running for it) is
+        // never silently overwritten by a successful generation. See
+        // acceptAiCandidate() for where the active project actually changes.
+        set({ pendingAiCandidate: result.project, pendingAiCandidateMode: 'new' })
       } else {
         // Step 3b: Surface the typed error. The code field allows the UI to
         // branch on error category without parsing the error string.
-        set({ aiError: result.error })
+        set({ aiError: result.error, aiErrorCode: result.code })
       }
     } catch (err: unknown) {
       // Step 3c: IPC transport failure — AIService itself never throws, but
@@ -1341,8 +1502,89 @@ export const useAppStore = create<AppState>((set, get) => ({
       currentProjectDoc: null,
       aiError: null,
       projectDirty: false,
-      currentProjectPath: null
+      currentProjectPath: null,
+      pendingAiCandidate: null,
+      pendingAiCandidateMode: null
     })
+  },
+
+  // -------------------------------------------------------------------------
+  // AI Candidate Review Actions (Phase 8, Slice 36)
+  // -------------------------------------------------------------------------
+
+  acceptAiCandidate: () => {
+    const { pendingAiCandidate } = get()
+    if (!pendingAiCandidate) return
+
+    // The active project is changing — cancel any pending autosave debounce
+    // so it can never fire against the project being replaced now.
+    cancelPendingAutosave()
+
+    set({
+      currentProjectDoc: pendingAiCandidate,
+      projectDirty: false,
+      currentProjectPath: null,
+      pendingAiCandidate: null,
+      pendingAiCandidateMode: null
+    })
+  },
+
+  discardAiCandidate: () => {
+    if (!get().pendingAiCandidate) return
+    set({ pendingAiCandidate: null, pendingAiCandidateMode: null })
+  },
+
+  // -------------------------------------------------------------------------
+  // AI Configuration Actions (Phase 8, Slice 35)
+  // -------------------------------------------------------------------------
+
+  loadAiConfig: async () => {
+    if (!window.api?.settings) return
+
+    set({ aiConfigLoading: true })
+
+    try {
+      const aiConfig = await window.api.settings.getAiConfig()
+      set({ aiConfig, aiConfigLoading: false })
+    } catch {
+      // Best-effort — a transport failure leaves aiConfig unchanged,
+      // matching loadRecentProjects()'s convention.
+      set({ aiConfigLoading: false })
+    }
+  },
+
+  saveAiConfig: async (request: IAiSettingsSaveRequest): Promise<ISettingsSaveResult> => {
+    if (!window.api?.settings) {
+      const err: ISettingsSaveResult = {
+        status: 'error',
+        code: 'unknown',
+        error: 'Settings API is not available.'
+      }
+      set({ aiConfigError: err.error })
+      return err
+    }
+
+    set({ aiConfigSaving: true, aiConfigError: null })
+
+    try {
+      const result = await window.api.settings.saveAiConfig(request)
+
+      if (result.status === 'success') {
+        // Re-fetch rather than locally computing hasApiKey — SettingsService
+        // is the sole authority on the unchanged/clear/set outcome.
+        await get().loadAiConfig()
+      } else {
+        set({ aiConfigError: result.error })
+      }
+
+      return result
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Save failed unexpectedly.'
+      set({ aiConfigError: message })
+      return { status: 'error', code: 'unknown', error: message }
+    } finally {
+      set({ aiConfigSaving: false })
+    }
   },
 
   // -------------------------------------------------------------------------
@@ -1386,7 +1628,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       aiError: null,
       // A freshly selected template is never dirty and has no saved path.
       projectDirty: false,
-      currentProjectPath: null
+      currentProjectPath: null,
+      // A pending candidate belongs to whatever project was active before —
+      // it must never be accepted onto this newly selected template.
+      pendingAiCandidate: null,
+      pendingAiCandidateMode: null
     })
   },
 
@@ -1621,7 +1867,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           projectDirty: false,
           lastSaveType: null,
           lastSavedAt: result.savedAt,
-          projectOpenError: null
+          projectOpenError: null,
+          // A pending candidate belongs to whatever project was active
+          // before — it must never be accepted onto this newly opened one.
+          pendingAiCandidate: null,
+          pendingAiCandidateMode: null
         })
       } else {
         set({ projectOpenError: result.error })
