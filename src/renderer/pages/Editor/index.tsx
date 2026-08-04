@@ -26,6 +26,9 @@
  *                                                        for revising the active project (Slice 37)
  * - acceptAiCandidate      : action                  — applies pendingAiCandidate to currentProjectDoc
  * - discardAiCandidate     : action                  — discards pendingAiCandidate without applying it
+ * - cancelAiGeneration     : action                  — soft-cancels an in-flight generation, resetting
+ *                                                        aiLoading immediately without waiting for the
+ *                                                        Main process (Phase 8, Slice 39)
  * - hardware               : IHardwareState           — used to derive the boardHint for the request
  *
  * Architectural rules:
@@ -193,6 +196,12 @@ interface PromptInputProps {
    * improve without an active project.
    */
   hasActiveProject: boolean
+  /**
+   * Called when the user clicks Cancel while a generation is in progress
+   * (Phase 8, Slice 39) — the only permitted path to
+   * useAppStore.cancelAiGeneration().
+   */
+  onCancel: () => void
   isLoading: boolean
   error: string | null
   /**
@@ -215,6 +224,7 @@ function PromptInput({
   onGenerate,
   onImprove,
   hasActiveProject,
+  onCancel,
   isLoading,
   error,
   errorCode,
@@ -351,30 +361,42 @@ function PromptInput({
               : 'Ctrl+Enter to generate'}
         </span>
 
-        <button
-          id="ai-generate-btn"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className={[
-            'flex items-center gap-8 px-16 py-8 rounded-lg text-[13px] font-semibold',
-            'transition-all duration-200',
-            canSubmit
-              ? 'bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md'
-              : 'bg-surface-elevated text-disabled cursor-not-allowed border border-border'
-          ].join(' ')}
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {effectiveMode === 'improve' ? 'Improving…' : 'Generating…'}
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4" />
-              {effectiveMode === 'improve' ? 'Improve Firmware' : 'Generate Firmware'}
-            </>
+        <div className="flex items-center gap-8">
+          {isLoading && (
+            <button
+              id="ai-cancel-btn"
+              onClick={onCancel}
+              className="px-16 py-8 rounded-lg text-[13px] font-semibold text-text-secondary border border-border hover:text-text-primary hover:bg-border/50 transition-all duration-200"
+            >
+              Cancel
+            </button>
           )}
-        </button>
+
+          <button
+            id="ai-generate-btn"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className={[
+              'flex items-center gap-8 px-16 py-8 rounded-lg text-[13px] font-semibold',
+              'transition-all duration-200',
+              canSubmit
+                ? 'bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md'
+                : 'bg-surface-elevated text-disabled cursor-not-allowed border border-border'
+            ].join(' ')}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                {effectiveMode === 'improve' ? 'Improving…' : 'Generating…'}
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                {effectiveMode === 'improve' ? 'Improve Firmware' : 'Generate Firmware'}
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -396,6 +418,7 @@ export function Editor(): React.JSX.Element {
     discardAiCandidate,
     generateAiProject,
     improveAiProject,
+    cancelAiGeneration,
     hardware,
     updateFirmware
   } = useAppStore()
@@ -508,6 +531,7 @@ export function Editor(): React.JSX.Element {
               onGenerate={generateAiProject}
               onImprove={improveAiProject}
               hasActiveProject={currentProjectDoc !== null}
+              onCancel={cancelAiGeneration}
               isLoading={aiLoading}
               error={aiError}
               errorCode={aiErrorCode}

@@ -518,6 +518,26 @@ export interface AppState {
   improveAiProject: (prompt: string) => Promise<void>
 
   /**
+   * Cancels the in-flight generateAiProject()/improveAiProject() call, if
+   * one is running (Phase 8, Slice 39).
+   *
+   * A "soft cancel" — the underlying Main-process request is not forcibly
+   * aborted; it keeps running to completion or timeout. This action only
+   * stops the Renderer from waiting for and applying its eventual result:
+   * it bumps the module-level generation token (orphaning the in-flight
+   * call) and immediately resets aiLoading/aiError/aiErrorCode, client-side.
+   *
+   * No-op if aiLoading is already false. Never sets aiError — cancellation
+   * is not an error, mirroring the existing "cancelled Save As is not an
+   * error" precedent (saveAsProject(), Slice 30, Ambiguity B).
+   *
+   * Pure synchronous action. No IPC. currentProjectDoc and pendingAiCandidate
+   * are untouched — a candidate can never exist yet for a call this cancels,
+   * since pendingAiCandidate is only ever set after a request completes.
+   */
+  cancelAiGeneration: () => void
+
+  /**
    * Clears the active project, resetting all project-related state to null.
    *
    * Resets:
@@ -1021,6 +1041,21 @@ let _serialStatusUnsubscribe: (() => void) | null = null
 let _projectSavedUnsubscribe: (() => void) | null = null
 
 /**
+ * Generation token (Phase 8, Slice 39). Incremented by cancelAiGeneration()
+ * to orphan whatever generateAiProject()/improveAiProject() call is
+ * currently in flight. A runtime resource, not application state — must
+ * never enter the Zustand store, matching every other module-level handle
+ * in this file.
+ *
+ * _aiGenerationToken is dedicated exclusively to the AI generation
+ * lifecycle. It must never be reused for uploads, project persistence,
+ * serial communication, or any other asynchronous workflow. Future
+ * asynchronous domains must introduce their own independent runtime
+ * resources.
+ */
+let _aiGenerationToken = 0
+
+/**
  * Autosave debounce timer (Phase 7, Slice 32). Owned exclusively by
  * updateFirmware(): every call clears any pending timer and starts a new
  * one, so exactly one autosaveProject() call fires per 3-second window of
@@ -1101,10 +1136,15 @@ async function runAiGeneration(
     return
   }
 
+  // Capture this call's token (Phase 8, Slice 39) — a subsequent
+  // cancelAiGeneration() bumps _aiGenerationToken, orphaning this call so
+  // its eventual response is discarded rather than applied.
+  const token = ++_aiGenerationToken
   set({ aiLoading: true, aiError: null, aiErrorCode: null })
 
   try {
     const result = await window.api.ai.generate(request)
+    if (_aiGenerationToken !== token) return // cancelled — discard silently
 
     if (result.status === 'success') {
       // currentProjectDoc is deliberately left untouched here — see
@@ -1114,10 +1154,16 @@ async function runAiGeneration(
       set({ aiError: result.error, aiErrorCode: result.code })
     }
   } catch (err: unknown) {
+    if (_aiGenerationToken !== token) return // cancelled — discard silently
     const message = err instanceof Error ? err.message : 'AI generation failed unexpectedly.'
     set({ aiError: message })
   } finally {
-    set({ aiLoading: false })
+    // Only reset aiLoading if this call still owns the current token — an
+    // orphaned call's finally must never clobber a newer call's loading
+    // state.
+    if (_aiGenerationToken === token) {
+      set({ aiLoading: false })
+    }
   }
 }
 
@@ -1550,6 +1596,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     await runAiGeneration(set, get, request, 'improve')
+  },
+
+  cancelAiGeneration: () => {
+    if (!get().aiLoading) return
+    _aiGenerationToken++
+    set({ aiLoading: false, aiError: null, aiErrorCode: null })
   },
 
   clearProject: () => {
