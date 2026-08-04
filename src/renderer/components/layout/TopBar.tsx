@@ -9,12 +9,13 @@ import {
   ChevronRight,
   Loader2,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Activity
 } from 'lucide-react'
 import { Badge } from '../common/Badge'
 import { Button } from '../common/Button'
 import { IconButton } from '../common/IconButton'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { navigationConfig } from '../../domain/navigation/config'
 import { useAppStore } from '../../store/useAppStore'
 import { SkeletonLoader } from '../common/SkeletonLoader'
@@ -35,6 +36,7 @@ export interface TopBarProps {
 
 export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Element {
   const location = useLocation()
+  const navigate = useNavigate()
   const currentPage = navigationConfig.find((item) => item.path === location.pathname)
   const {
     hardware,
@@ -304,6 +306,16 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
             <>
               <CheckCircle2 className="w-[14px] h-[14px] shrink-0" />
               Firmware uploaded successfully.
+              <Button
+                id="topbar-view-serial-btn"
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-[24px] text-success hover:text-white hover:!bg-transparent"
+                leftIcon={<Activity className="w-3.5 h-3.5" />}
+                onClick={() => navigate('/monitor')}
+              >
+                View Serial Output
+              </Button>
             </>
           ) : (
             <>

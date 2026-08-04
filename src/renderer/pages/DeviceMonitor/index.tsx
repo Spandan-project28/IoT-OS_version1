@@ -37,6 +37,7 @@ export function DeviceMonitor(): React.JSX.Element {
     serialAutoScroll,
     serialError,
     serialLoading,
+    lastUploadedPort,
     openSerial,
     closeSerial,
     writeSerial,
@@ -44,10 +45,18 @@ export function DeviceMonitor(): React.JSX.Element {
     toggleSerialAutoScroll
   } = useAppStore()
 
-  // Prefer the first identified board's port; fall back to the first detected
-  // port so the UI is useful even when the board is not fully identified yet.
+  // Prefer the most recently uploaded port (Phase 8, Slice 38) — only if it
+  // is still present in hardware.ports, so a since-unplugged port is never
+  // silently preselected. Otherwise fall back to the first identified
+  // board's port, then the first detected port, so the UI is useful even
+  // when the board is not fully identified yet.
   const connectedBoard = hardware.connectedBoards[0] ?? null
-  const selectedPortPath = connectedBoard?.port ?? hardware.ports[0]?.path ?? null
+  const uploadedPortStillPresent =
+    lastUploadedPort !== null && hardware.ports.some((p) => p.path === lastUploadedPort)
+      ? lastUploadedPort
+      : null
+  const selectedPortPath =
+    uploadedPortStillPresent ?? connectedBoard?.port ?? hardware.ports[0]?.path ?? null
 
   const [baudRate, setBaudRate] = useState<number>(9600)
   const [inputText, setInputText] = useState<string>('')

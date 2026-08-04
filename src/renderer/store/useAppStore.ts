@@ -49,8 +49,13 @@
  *   clearProject()     → resets currentProjectDoc and aiError to null
  *
  * AI state lifecycle:
- *   generateAiProject(request) → calls window.api.ai.generate(), stores IProjectDocument
- *                                 on success or sets aiError on failure. Never throws.
+ *   generateAiProject(request) → calls window.api.ai.generate(), stores a pendingAiCandidate
+ *                                 (mode 'new') on success or sets aiError on failure. Never throws.
+ *   improveAiProject(prompt)   → builds a request from currentProjectDoc, stores a
+ *                                 pendingAiCandidate (mode 'improve') on success (Phase 8, Slice 37).
+ *   acceptAiCandidate()        → applies the pending candidate to currentProjectDoc; 'improve'
+ *                                 mode preserves the original id/path, 'new' mode does not.
+ *   discardAiCandidate()       → discards the pending candidate without applying it.
  *
  * Typical usage pattern:
  *   Call initializeHardware() once at the top-level component (AppProviders).
@@ -201,14 +206,17 @@ export interface AppState {
   /**
    * The kind of pending candidate, or null when none is pending.
    *
-   * 'new' is the only value this slice ever produces (a fresh generation).
-   * 'improve' is reserved for a future slice — introducing the member now
-   * only, with no branching logic for it yet, avoids a breaking type change
-   * later without implementing anything beyond this slice's scope.
+   * 'new' is produced by generateAiProject() — a fresh generation with no
+   * relationship to any prior project.
+   * 'improve' is produced by improveAiProject() (Phase 8, Slice 37) — a
+   * revision of the active project's existing firmware. acceptAiCandidate()
+   * branches on this value to decide whether accepting the candidate starts
+   * a new project identity ('new') or updates the existing one in place
+   * ('improve').
    *
    * Non-null if and only if pendingAiCandidate is non-null.
    */
-  pendingAiCandidateMode: 'new' | null
+  pendingAiCandidateMode: 'new' | 'improve' | null
 
   /**
    * True once the active project has unsaved edits.
@@ -397,6 +405,21 @@ export interface AppState {
    */
   lastUploadResult: IUploadResult | null
 
+  /**
+   * The port most recently uploaded to successfully (Phase 8, Slice 38).
+   *
+   * Null until the first successful compileAndUploadFirmware() call. Set
+   * only by that action's success branch — never by uploadFirmware() (not
+   * called from any UI component), never by a failed upload, and never
+   * cleared by any project-lifecycle action (this is Upload/Hardware domain
+   * state, independent of project identity, matching lastUploadResult).
+   *
+   * Read by DeviceMonitor as a preference — not a forced override — for its
+   * selectedPortPath derivation, so a successful upload naturally leads into
+   * watching the board run without requiring the user to re-select the port.
+   */
+  lastUploadedPort: string | null
+
   // -------------------------------------------------------------------------
   // Serial State (Phase 4, Slice 16)
   //
@@ -473,6 +496,26 @@ export interface AppState {
    * @param request - The generate request containing the user prompt and optional context.
    */
   generateAiProject: (request: IAIGenerateRequest) => Promise<void>
+
+  /**
+   * Requests an AI-assisted revision of the active project's firmware
+   * (Phase 8, Slice 37).
+   *
+   * No-op (no IPC call, no state change) if currentProjectDoc is null —
+   * there is nothing to improve. Otherwise builds an IAIGenerateRequest from
+   * the active project (boardHint, and context.currentFirmware /
+   * context.currentExplanation) and shares the exact same underlying
+   * pipeline, loading/error lifecycle, and pending-candidate guard as
+   * generateAiProject — the only difference is the resulting candidate is
+   * stored with pendingAiCandidateMode: 'improve' instead of 'new'.
+   *
+   * Never throws into React. currentProjectDoc is left completely untouched
+   * until the resulting candidate is explicitly accepted via
+   * acceptAiCandidate().
+   *
+   * @param prompt - The natural-language improvement instruction.
+   */
+  improveAiProject: (prompt: string) => Promise<void>
 
   /**
    * Clears the active project, resetting all project-related state to null.
@@ -1029,6 +1072,55 @@ function scheduleAutosave(delayMs: number, getStore: () => AppState): void {
   }, delayMs)
 }
 
+/**
+ * Shared internal helper (Phase 8, Slice 37): runs the AI generation pipeline
+ * common to both generateAiProject() and improveAiProject() — the
+ * pending-candidate guard, the preload-availability guard, the
+ * aiLoading/aiError/aiErrorCode lifecycle, and the pending-candidate
+ * assignment on success. The only difference between the two callers is the
+ * constructed IAIGenerateRequest and the `mode` tag applied to a successful
+ * result.
+ *
+ * Extracted so improveAiProject() does not duplicate this logic — reuse,
+ * not duplication, matching this file's existing scheduleAutosave()
+ * extraction (Slice 34).
+ */
+async function runAiGeneration(
+  set: (partial: Partial<AppState>) => void,
+  get: () => AppState,
+  request: IAIGenerateRequest,
+  mode: 'new' | 'improve'
+): Promise<void> {
+  // Guard: a candidate is already pending review — must be resolved
+  // (accepted or discarded) before a new generation can start.
+  if (get().pendingAiCandidate) return
+
+  // Guard: preload bridge must be available
+  if (!window.api?.ai) {
+    set({ aiError: 'AI API is not available.', aiErrorCode: null, aiLoading: false })
+    return
+  }
+
+  set({ aiLoading: true, aiError: null, aiErrorCode: null })
+
+  try {
+    const result = await window.api.ai.generate(request)
+
+    if (result.status === 'success') {
+      // currentProjectDoc is deliberately left untouched here — see
+      // acceptAiCandidate() for where the active project actually changes.
+      set({ pendingAiCandidate: result.project, pendingAiCandidateMode: mode })
+    } else {
+      set({ aiError: result.error, aiErrorCode: result.code })
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'AI generation failed unexpectedly.'
+    set({ aiError: message })
+  } finally {
+    set({ aiLoading: false })
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Store implementation
 // ---------------------------------------------------------------------------
@@ -1087,6 +1179,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   uploadError: null,
   lastCompileResult: null,
   lastUploadResult: null,
+  lastUploadedPort: null,
 
   // -------------------------------------------------------------------------
   // Serial State initial values (Phase 4, Slice 16)
@@ -1229,7 +1322,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await window.api.upload.compileAndUpload(request)
       set({ lastUploadResult: result })
 
-      if (result.status === 'error') {
+      if (result.status === 'success') {
+        set({ lastUploadedPort: request.port })
+      } else {
         set({ uploadError: result.error })
       }
     } catch (err: unknown) {
@@ -1437,51 +1532,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   // -------------------------------------------------------------------------
 
   generateAiProject: async (request: IAIGenerateRequest) => {
-    // Guard: a candidate is already pending review — must be resolved
-    // (accepted or discarded) before a new generation can start. Checked
-    // here, not only via the disabled UI control, so this can never be
-    // bypassed by a stray programmatic call (Phase 8, Slice 36).
-    if (get().pendingAiCandidate) return
+    await runAiGeneration(set, get, request, 'new')
+  },
 
-    // Guard: preload bridge must be available
-    if (!window.api?.ai) {
-      set({ aiError: 'AI API is not available.', aiErrorCode: null, aiLoading: false })
-      return
-    }
+  improveAiProject: async (prompt: string) => {
+    // No-op if there is no active project — there is nothing to improve.
+    const { currentProjectDoc } = get()
+    if (!currentProjectDoc) return
 
-    // Step 1: Set loading state and clear the previous error.
-    // Matches the async lifecycle used by compileFirmware, uploadFirmware,
-    // openSerial, etc.
-    set({ aiLoading: true, aiError: null, aiErrorCode: null })
-
-    try {
-      // Step 2: Delegate to the preload bridge — AIService runs the full
-      // pipeline in the Main process (PromptBuilder → AIClient → ResponseParser
-      // → ResponseValidator → IProjectDocument).
-      const result = await window.api.ai.generate(request)
-
-      if (result.status === 'success') {
-        // Step 3a: Store the result as a pending candidate awaiting explicit
-        // user confirmation (Phase 8, Slice 36) — currentProjectDoc is
-        // deliberately left untouched here, so an active, dirty, unsaved
-        // project (and any autosave debounce already running for it) is
-        // never silently overwritten by a successful generation. See
-        // acceptAiCandidate() for where the active project actually changes.
-        set({ pendingAiCandidate: result.project, pendingAiCandidateMode: 'new' })
-      } else {
-        // Step 3b: Surface the typed error. The code field allows the UI to
-        // branch on error category without parsing the error string.
-        set({ aiError: result.error, aiErrorCode: result.code })
+    const request: IAIGenerateRequest = {
+      prompt,
+      boardHint: currentProjectDoc.boardHint,
+      context: {
+        currentFirmware: currentProjectDoc.firmware,
+        currentExplanation: currentProjectDoc.explanation ?? undefined
       }
-    } catch (err: unknown) {
-      // Step 3c: IPC transport failure — AIService itself never throws, but
-      // the preload bridge can fail if the Main process is unavailable.
-      const message = err instanceof Error ? err.message : 'AI generation failed unexpectedly.'
-      set({ aiError: message })
-    } finally {
-      // Step 4: Always restore the loading flag, regardless of outcome.
-      set({ aiLoading: false })
     }
+
+    await runAiGeneration(set, get, request, 'improve')
   },
 
   clearProject: () => {
@@ -1509,17 +1577,40 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // -------------------------------------------------------------------------
-  // AI Candidate Review Actions (Phase 8, Slice 36)
+  // AI Candidate Review Actions (Phase 8, Slice 36; extended Slice 37)
   // -------------------------------------------------------------------------
 
   acceptAiCandidate: () => {
-    const { pendingAiCandidate } = get()
+    const { pendingAiCandidate, pendingAiCandidateMode, currentProjectDoc } = get()
     if (!pendingAiCandidate) return
 
     // The active project is changing — cancel any pending autosave debounce
-    // so it can never fire against the project being replaced now.
+    // so it can never fire against the project being replaced/updated now.
     cancelPendingAutosave()
 
+    if (pendingAiCandidateMode === 'improve' && currentProjectDoc) {
+      // Improve updates the existing project in place (Phase 8, Slice 37):
+      // re-stamp the candidate with the original project's id and leave
+      // currentProjectPath untouched, matching IProjectDocument.id's own
+      // documented contract that it is never regenerated on save, rename,
+      // autosave, or reload. The content differs from what's on disk, so
+      // the project is now dirty and an autosave is scheduled exactly as
+      // updateFirmware() already does.
+      const updatedDoc: IProjectDocument = { ...pendingAiCandidate, id: currentProjectDoc.id }
+
+      set({
+        currentProjectDoc: updatedDoc,
+        projectDirty: true,
+        pendingAiCandidate: null,
+        pendingAiCandidateMode: null
+      })
+
+      scheduleAutosave(AUTOSAVE_DEBOUNCE_MS, get)
+      return
+    }
+
+    // 'new' mode: identical to the pre-Slice-37 behavior — the candidate's
+    // own freshly minted id is adopted and there is no prior save path.
     set({
       currentProjectDoc: pendingAiCandidate,
       projectDirty: false,

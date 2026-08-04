@@ -12,12 +12,12 @@
  *   way that would produce materially different output from the same request.
  *
  * Future methods (out of scope for V0.1):
- * - buildImprove(request)  — wraps existing firmware with improvement instructions
  * - buildExplain(request)  — asks for a code walkthrough of existing firmware
  * - buildDebug(request)    — asks for diagnosis of a reported problem
  *
  * Public API:
  * - buildGenerate(request) → { system, user }  (constructs a generate prompt pair)
+ * - buildImprove(request)  → { system, user }  (constructs an improve prompt pair, Phase 8, Slice 37)
  * - PROMPT_VERSION         → number            (current prompt schema version)
  */
 
@@ -202,10 +202,89 @@ function buildGenerate(request: IAIGenerateRequest): IAIPrompt {
   return { system, user }
 }
 
+/**
+ * Constructs a system + user prompt pair for improving an existing project's
+ * firmware (Phase 8, Slice 37).
+ *
+ * Only called when request.context?.currentFirmware is present — AIService
+ * is responsible for that branching decision, not this function.
+ *
+ * The system prompt:
+ * - Establishes the LLM as an embedded systems firmware engineer performing
+ *   a targeted revision, not a fresh generation.
+ * - Specifies the target board with the same technical accuracy as buildGenerate.
+ * - Instructs the LLM to preserve everything not explicitly asked to change,
+ *   and to explain only the delta rather than the whole program.
+ * - Reuses the identical JSON response schema as buildGenerate — the LLM
+ *   still returns a complete IAIRawResponse, not a diff or patch.
+ *
+ * The user prompt:
+ * - Carries the natural-language improvement instruction.
+ * - Includes the current firmware verbatim so the LLM has the exact source
+ *   to modify.
+ * - Appends the current explanation when present, for additional context.
+ *
+ * @param request - The improve request from the Renderer via IPC. Must carry
+ *   request.context.currentFirmware.
+ * @returns A { system, user } pair ready to pass to AIClient.send().
+ */
+function buildImprove(request: IAIGenerateRequest): IAIPrompt {
+  const board = boardContext(request.boardHint)
+  const schema = jsonSchema()
+
+  const system = [
+    'You are an expert embedded systems firmware engineer specialising in Arduino and ESP32 development.',
+    'You are revising an existing project, not starting a new one.',
+    '',
+    board,
+    '',
+    'Your task: modify the given firmware according to the user\'s instruction.',
+    '- Preserve everything in the existing firmware that the instruction does not ask you to change.',
+    '- Make the smallest change that correctly satisfies the instruction.',
+    '- Do not rewrite unrelated logic, rename unrelated variables, or restyle unrelated code.',
+    '- The explanation you return must describe only what changed and why — not the whole program.',
+    '',
+    'RESPONSE FORMAT:',
+    'Respond with ONLY a single valid JSON object. No markdown, no code fences, no prose outside JSON.',
+    'The JSON object must match this exact schema:',
+    schema,
+    '',
+    'FIRMWARE REQUIREMENTS:',
+    '- Return the complete, compilable firmware source — not a diff or patch.',
+    '- Include both setup() and loop() functions.',
+    '- Add inline comments explaining each meaningful line you add or change.',
+    '- Use only libraries available in the standard Arduino IDE or the specified board core.',
+    '- Do not use placeholder functions — all code must compile and run.',
+    '',
+    'COMPONENTS AND WIRING REQUIREMENTS:',
+    '- List every physical component the finished project requires, including ones already present.',
+    '- Write one concrete wiring step per line, matching the target board\'s pin numbers exactly.'
+  ].join('\n')
+
+  const userParts: string[] = [request.prompt.trim()]
+
+  userParts.push('')
+  userParts.push('Current firmware to modify:')
+  userParts.push('```')
+  userParts.push(request.context?.currentFirmware ?? '')
+  userParts.push('```')
+
+  if (request.context?.currentExplanation) {
+    userParts.push('')
+    userParts.push('Current explanation (for context):')
+    userParts.push(request.context.currentExplanation)
+  }
+
+  const user = userParts.join('\n')
+
+  return { system, user }
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
 export const PromptBuilder = Object.freeze({
-  buildGenerate
+  buildGenerate,
+  buildImprove
 })

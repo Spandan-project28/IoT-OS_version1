@@ -36,7 +36,7 @@
  *   IAIGenerateRequest
  *       ↓  resolveProviderConfig()         ← reads env vars; never sent to Renderer
  *   IAIProviderConfig | null (mock)
- *       ↓  PromptBuilder.buildGenerate()
+ *       ↓  PromptBuilder.buildGenerate() / buildImprove()  ← branches on context.currentFirmware
  *   { system, user } prompt pair
  *       ↓  AIClient.send() / MockAIClient.send()
  *   IAIClientResult (raw LLM text)
@@ -250,8 +250,12 @@ async function generate(
     const config = resolveProviderConfig(persisted)
     const effectiveMock = config === null || process.env[ENV_PROVIDER] === 'mock'
 
-    // Step 2: Build prompt
-    const prompt = PromptBuilder.buildGenerate(request)
+    // Step 2: Build prompt. Branches to buildImprove() when the request
+    // carries existing firmware to revise (Phase 8, Slice 37) — otherwise
+    // builds a fresh-generation prompt exactly as before.
+    const prompt = request.context?.currentFirmware
+      ? PromptBuilder.buildImprove(request)
+      : PromptBuilder.buildGenerate(request)
 
     // Step 3: Call the appropriate client.
     // MockAIClient requires a valid IAIProviderConfig signature even though it

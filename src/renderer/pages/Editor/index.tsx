@@ -14,13 +14,19 @@
  * - aiError            : string | null            — error from last failed generation
  * - aiErrorCode        : AIErrorCode | null       — structured error code (Phase 8, Slice 35);
  *                                                    drives the "Go to Settings" link
- * - pendingAiCandidate : IProjectDocument | null — a successful generation awaiting explicit
- *                                                   Accept/Discard (Phase 8, Slice 36); never
- *                                                   applied to currentProjectDoc automatically
- * - generateAiProject  : action                  — the only permitted path to window.api.ai
- * - acceptAiCandidate  : action                  — applies pendingAiCandidate to currentProjectDoc
- * - discardAiCandidate : action                  — discards pendingAiCandidate without applying it
- * - hardware           : IHardwareState           — used to derive the boardHint for the request
+ * - pendingAiCandidate     : IProjectDocument | null — a successful generation/improvement awaiting
+ *                                                       explicit Accept/Discard (Phase 8, Slice 36);
+ *                                                       never applied to currentProjectDoc automatically
+ * - pendingAiCandidateMode : 'new' | 'improve' | null — which kind of candidate is pending
+ *                                                        (Phase 8, Slice 37); drives whether the
+ *                                                        Review card shows a diff or a summary
+ * - generateAiProject      : action                  — the only permitted path to window.api.ai
+ *                                                        for a fresh generation
+ * - improveAiProject       : action                  — the only permitted path to window.api.ai
+ *                                                        for revising the active project (Slice 37)
+ * - acceptAiCandidate      : action                  — applies pendingAiCandidate to currentProjectDoc
+ * - discardAiCandidate     : action                  — discards pendingAiCandidate without applying it
+ * - hardware               : IHardwareState           — used to derive the boardHint for the request
  *
  * Architectural rules:
  * - window.api.ai is NEVER called from this component.
@@ -33,6 +39,7 @@ import { TopBar } from '../../components/layout/TopBar'
 import { Panel } from '../../components/common/Panel'
 import { ScrollContainer } from '../../components/common/ScrollContainer'
 import { MonacoEditorPanel } from '../../components/editor/MonacoEditorPanel'
+import { DiffEditor } from '@monaco-editor/react'
 import { useAppStore } from '../../store/useAppStore'
 import {
   Sparkles,
@@ -174,6 +181,18 @@ function ProjectDetailSections({ document }: { document: IProjectDocument }): Re
 interface PromptInputProps {
   boardHint: IAIGenerateRequest['boardHint']
   onGenerate: (request: IAIGenerateRequest) => void
+  /**
+   * Called with the raw instruction text when the user submits in 'improve'
+   * mode (Phase 8, Slice 37) — the only permitted path to
+   * useAppStore.improveAiProject().
+   */
+  onImprove: (prompt: string) => void
+  /**
+   * True when a project is currently open. Gates whether the 'Improve' mode
+   * option is offered at all (Phase 8, Slice 37) — there is nothing to
+   * improve without an active project.
+   */
+  hasActiveProject: boolean
   isLoading: boolean
   error: string | null
   /**
@@ -194,21 +213,35 @@ interface PromptInputProps {
 function PromptInput({
   boardHint,
   onGenerate,
+  onImprove,
+  hasActiveProject,
   isLoading,
   error,
   errorCode,
   disabled
 }: PromptInputProps): React.JSX.Element {
   const [prompt, setPrompt] = React.useState('')
+  const [mode, setMode] = React.useState<'generate' | 'improve'>('generate')
 
-  function handleGenerate(): void {
+  // The 'improve' option only ever makes sense while a project is open — if
+  // it disappears mid-selection (e.g. the active project is cleared), fall
+  // back to treating this submission as 'generate' rather than silently
+  // no-opping through improveAiProject()'s own currentProjectDoc guard.
+  const effectiveMode = hasActiveProject ? mode : 'generate'
+
+  function handleSubmit(): void {
     const trimmed = prompt.trim()
     if (!trimmed || isLoading || disabled) return
+
+    if (effectiveMode === 'improve') {
+      onImprove(trimmed)
+      return
+    }
 
     const request: IAIGenerateRequest = {
       prompt: trimmed,
       boardHint,
-      // context is always undefined for V0.1 Generate — future operations populate it
+      // context is always undefined for Generate — improveAiProject() populates it separately
       context: undefined
     }
 
@@ -219,7 +252,7 @@ function PromptInput({
     // Ctrl+Enter or Cmd+Enter submits the prompt
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault()
-      handleGenerate()
+      handleSubmit()
     }
   }
 
@@ -236,6 +269,38 @@ function PromptInput({
         <div className="text-[15px] font-semibold text-text-primary">Describe Your Project</div>
       </div>
 
+      {/* Generate/Improve mode toggle — only offered when a project is open (Phase 8, Slice 37) */}
+      {hasActiveProject && (
+        <div className="flex items-center gap-4 p-4 rounded-lg bg-background border border-border w-fit">
+          <button
+            id="ai-mode-generate-btn"
+            onClick={() => setMode('generate')}
+            disabled={isLoading || disabled}
+            className={[
+              'px-12 py-6 rounded-md text-[12px] font-semibold transition-colors',
+              effectiveMode === 'generate'
+                ? 'bg-primary text-white'
+                : 'text-text-secondary hover:text-text-primary'
+            ].join(' ')}
+          >
+            Generate
+          </button>
+          <button
+            id="ai-mode-improve-btn"
+            onClick={() => setMode('improve')}
+            disabled={isLoading || disabled}
+            className={[
+              'px-12 py-6 rounded-md text-[12px] font-semibold transition-colors',
+              effectiveMode === 'improve'
+                ? 'bg-primary text-white'
+                : 'text-text-secondary hover:text-text-primary'
+            ].join(' ')}
+          >
+            Improve
+          </button>
+        </div>
+      )}
+
       {/* Prompt textarea */}
       <textarea
         id="ai-prompt-input"
@@ -244,7 +309,9 @@ function PromptInput({
         onKeyDown={handleKeyDown}
         disabled={isLoading || disabled}
         placeholder={
-          'e.g. "Blink an LED every 500ms on pin 13" or "Read temperature from DHT11 and send to Serial Monitor"'
+          effectiveMode === 'improve'
+            ? 'e.g. "Add a button on pin 4 that turns the LED off" or "Slow the blink down to once per second"'
+            : 'e.g. "Blink an LED every 500ms on pin 13" or "Read temperature from DHT11 and send to Serial Monitor"'
         }
         rows={4}
         className={[
@@ -272,15 +339,21 @@ function PromptInput({
         </div>
       )}
 
-      {/* Generate button + keyboard hint */}
+      {/* Generate/Improve button + keyboard hint */}
       <div className="flex items-center justify-between gap-12">
         <span className="text-[11px] text-disabled font-mono hidden sm:block">
-          {isLoading ? 'Generating...' : 'Ctrl+Enter to generate'}
+          {isLoading
+            ? effectiveMode === 'improve'
+              ? 'Improving...'
+              : 'Generating...'
+            : effectiveMode === 'improve'
+              ? 'Ctrl+Enter to improve'
+              : 'Ctrl+Enter to generate'}
         </span>
 
         <button
           id="ai-generate-btn"
-          onClick={handleGenerate}
+          onClick={handleSubmit}
           disabled={!canSubmit}
           className={[
             'flex items-center gap-8 px-16 py-8 rounded-lg text-[13px] font-semibold',
@@ -293,12 +366,12 @@ function PromptInput({
           {isLoading ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Generating…
+              {effectiveMode === 'improve' ? 'Improving…' : 'Generating…'}
             </>
           ) : (
             <>
               <Sparkles className="w-4 h-4" />
-              Generate Firmware
+              {effectiveMode === 'improve' ? 'Improve Firmware' : 'Generate Firmware'}
             </>
           )}
         </button>
@@ -318,9 +391,11 @@ export function Editor(): React.JSX.Element {
     aiError,
     aiErrorCode,
     pendingAiCandidate,
+    pendingAiCandidateMode,
     acceptAiCandidate,
     discardAiCandidate,
     generateAiProject,
+    improveAiProject,
     hardware,
     updateFirmware
   } = useAppStore()
@@ -431,6 +506,8 @@ export function Editor(): React.JSX.Element {
             <PromptInput
               boardHint={boardHint}
               onGenerate={generateAiProject}
+              onImprove={improveAiProject}
+              hasActiveProject={currentProjectDoc !== null}
               isLoading={aiLoading}
               error={aiError}
               errorCode={aiErrorCode}
@@ -458,7 +535,29 @@ export function Editor(): React.JSX.Element {
                   {pendingAiCandidate.description}
                 </AssistantSection>
 
-                <ProjectDetailSections document={pendingAiCandidate} />
+                {pendingAiCandidateMode === 'improve' && currentProjectDoc ? (
+                  /* Firmware diff — original (active project) vs. candidate
+                     (Phase 8, Slice 37). Replaces the plain summary only for
+                     'improve'-mode candidates; 'new'-mode candidates keep
+                     Slice 36's unchanged ProjectDetailSections view below. */
+                  <div className="rounded-2xl overflow-hidden border border-border shadow-sm">
+                    <DiffEditor
+                      height="400px"
+                      language="cpp"
+                      theme="vs-dark"
+                      original={currentProjectDoc.firmware}
+                      modified={pendingAiCandidate.firmware}
+                      options={{
+                        readOnly: true,
+                        renderSideBySide: true,
+                        minimap: { enabled: false },
+                        fontSize: 13
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <ProjectDetailSections document={pendingAiCandidate} />
+                )}
 
                 <div className="flex items-center gap-12">
                   <button
