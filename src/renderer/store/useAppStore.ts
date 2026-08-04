@@ -53,6 +53,9 @@
  *                                 (mode 'new') on success or sets aiError on failure. Never throws.
  *   improveAiProject(prompt)   → builds a request from currentProjectDoc, stores a
  *                                 pendingAiCandidate (mode 'improve') on success (Phase 8, Slice 37).
+ *   cancelAiGeneration()       → soft-cancels an in-flight generate/improve call, resetting
+ *                                 aiLoading immediately without waiting for the Main process
+ *                                 (Phase 8, Slice 39).
  *   acceptAiCandidate()        → applies the pending candidate to currentProjectDoc; 'improve'
  *                                 mode preserves the original id/path, 'new' mode does not.
  *   discardAiCandidate()       → discards the pending candidate without applying it.
@@ -541,8 +544,16 @@ export interface AppState {
    * Clears the active project, resetting all project-related state to null.
    *
    * Resets:
-   * - currentProjectDoc → null
-   * - aiError           → null
+   * - currentProjectDoc      → null
+   * - aiError                → null
+   * - projectDirty           → false
+   * - currentProjectPath     → null
+   * - pendingAiCandidate     → null
+   * - pendingAiCandidateMode → null
+   *
+   * Also cancels any pending autosave debounce (Phase 7, Slice 32) — the
+   * active project is changing, so a timer scheduled against it must never
+   * fire afterward.
    *
    * Does NOT reset aiLoading — if a generation is in progress, the loading
    * indicator should remain until the operation completes.
@@ -1061,8 +1072,11 @@ let _aiGenerationToken = 0
  * one, so exactly one autosaveProject() call fires per 3-second window of
  * inactivity — never one per edit, never on a fixed schedule. Also cleared
  * whenever the active project changes (openProject, selectTemplate,
- * generateAiProject, clearProject) so a timer scheduled by one project can
- * never fire against a different, subsequently active one.
+ * acceptAiCandidate, clearProject) so a timer scheduled by one project can
+ * never fire against a different, subsequently active one. Note: an AI
+ * generation/improvement no longer changes the active project directly
+ * (Phase 8, Slice 36) — the debounce is only cleared once a candidate is
+ * actually accepted, via acceptAiCandidate().
  *
  * A runtime resource, not application state — must never enter the Zustand
  * store, matching the push-event unsubscribe handles above.
@@ -1075,7 +1089,7 @@ let _autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
  * is set. A no-op if none is pending.
  *
  * Called whenever the active project changes (openProject, selectTemplate,
- * generateAiProject, clearProject, deleteProject) or is superseded by a
+ * acceptAiCandidate, clearProject, deleteProject) or is superseded by a
  * manual save (saveProject, saveAsProject), so a timer scheduled against one
  * project/state can never fire against a different, subsequently active one.
  *

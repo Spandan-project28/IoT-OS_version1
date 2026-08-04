@@ -143,8 +143,10 @@ export interface IAiApi {
    * ResponseParser → ResponseValidator → IProjectDocument.
    *
    * On success: IAIResult { status: 'success', project: IProjectDocument }.
-   *   The project is a fully constructed, immutable IProjectDocument ready to be
-   *   stored in the Zustand store as currentProjectDoc.
+   *   The project is a fully constructed, immutable IProjectDocument. The
+   *   Zustand store holds it as a pendingAiCandidate awaiting explicit
+   *   Accept/Discard (Phase 8, Slice 36) — it is never written directly to
+   *   currentProjectDoc by this call.
    *
    * On error: IAIResult { status: 'error', code: AIErrorCode, error: string }.
    *   The code identifies the error category for UI branching without string parsing.

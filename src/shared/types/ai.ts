@@ -25,12 +25,16 @@
  * Consumers (V0.1):
  * - AIService           (Main process — receives IAIGenerateRequest, returns IAIResult)
  * - aiIpcHandlers       (Slice 24 — serialises IAIGenerateRequest and IAIResult over IPC)
- * - Zustand store       (Slice 25 — stores IAIResult.project in currentProjectDoc)
+ * - Zustand store       (Slice 25 — stores IAIResult.project as a pendingAiCandidate,
+ *                         Phase 8 Slice 36; applied to currentProjectDoc only on explicit Accept)
  * - Editor page         (Slice 26 — calls generateAiProject, reads aiLoading / aiError)
  *
- * Future consumers (out of scope for V0.1):
- * - ImproveService      (future — sends IAIGenerateRequest with context.currentFirmware populated)
- * - SettingsService     (future — persists and restores IAIProviderConfig from disk)
+ * Realised (Phase 8):
+ * - Improve             (Slice 37 — implemented inside AIService/PromptBuilder via
+ *                         context.currentFirmware, not a separate service)
+ * - SettingsService     (Slice 35 — persists IAIProviderConfig-equivalent settings;
+ *                         AIService receives resolved settings as a parameter, never
+ *                         reads SettingsService directly)
  */
 
 import type { IProjectDocument } from './project'

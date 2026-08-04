@@ -8,7 +8,7 @@
  * ─────────────────────────────────────────────────────────────────────────
  *
  *   Editor (React)
- *       ↓  generateAiProject(request)      ← Zustand action
+ *       ↓  generateAiProject(request) / improveAiProject(prompt)  ← Zustand actions
  *   Zustand (useAppStore)
  *       ↓  window.api.ai.generate(request) ← Preload bridge
  *   Preload (contextBridge)
@@ -19,15 +19,16 @@
  *       ↓  IAIResult
  *   IPC boundary
  *       ↓  IPC response → Preload → Zustand
- *   currentProjectDoc                      ← set() atomically in store
- *       ↓
- *   Editor (React)                         ← re-renders from currentProjectDoc
+ *   pendingAiCandidate                     ← set() atomically in store, awaiting explicit
+ *       ↓                                     Accept/Discard (Phase 8, Slice 36) — never
+ *   Editor (React)                         ← currentProjectDoc directly
  *
  * AIService is the single orchestration boundary. PromptBuilder, AIClient,
  * ResponseParser, and ResponseValidator are internal implementation details
  * of this module — the Renderer never communicates with them directly.
- * currentProjectDoc is the only object that crosses back into the Renderer
- * after a successful generation.
+ * A successful generation crosses back into the Renderer as a pendingAiCandidate
+ * (Phase 8, Slice 36) — AIService itself has no knowledge of the review gate;
+ * that decision belongs entirely to useAppStore.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * INTERNAL AISERVICE FLOW  (execution sequence inside generate())
