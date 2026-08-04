@@ -79,10 +79,10 @@ function AssistantSection({
 }: AssistantSectionProps): React.JSX.Element {
   if (highlighted) {
     return (
-      <div className="flex items-start gap-16 p-20 rounded-2xl bg-surface border-2 border-primary/20 shadow-sm relative overflow-hidden">
+      <div className="flex items-start gap-16 p-20 rounded-2xl bg-surface border-2 border-primary/20 shadow-sm relative overflow-hidden shrink-0">
         <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
         <div className="text-primary mt-2 shrink-0">{icon}</div>
-        <div>
+        <div className="min-w-0">
           <div className="text-[15px] font-semibold text-text-primary mb-6">{title}</div>
           <div className="text-[14px] text-text-secondary leading-relaxed">{children}</div>
         </div>
@@ -91,9 +91,9 @@ function AssistantSection({
   }
 
   return (
-    <div className="flex items-start gap-16 p-20 rounded-2xl bg-surface border border-border shadow-sm">
+    <div className="flex items-start gap-16 p-20 rounded-2xl bg-surface border border-border shadow-sm shrink-0">
       <div className="text-text-secondary mt-2 shrink-0">{icon}</div>
-      <div>
+      <div className="min-w-0">
         <div className="text-[15px] font-semibold text-text-primary mb-6">{title}</div>
         <div className="text-[14px] text-text-secondary leading-relaxed">{children}</div>
       </div>
@@ -269,7 +269,7 @@ function PromptInput({
   const canSubmit = prompt.trim().length > 0 && !isLoading && !disabled
 
   return (
-    <div className="flex flex-col gap-12 p-20 rounded-2xl bg-surface border-2 border-primary/20 shadow-sm relative overflow-hidden">
+    <div className="flex flex-col gap-12 p-20 rounded-2xl bg-surface border-2 border-primary/20 shadow-sm relative overflow-hidden shrink-0">
       {/* Left accent bar — same as highlighted AssistantSection */}
       <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
 
@@ -286,8 +286,10 @@ function PromptInput({
             id="ai-mode-generate-btn"
             onClick={() => setMode('generate')}
             disabled={isLoading || disabled}
+            aria-pressed={effectiveMode === 'generate'}
             className={[
               'px-12 py-6 rounded-md text-[12px] font-semibold transition-colors',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
               effectiveMode === 'generate'
                 ? 'bg-primary text-white'
                 : 'text-text-secondary hover:text-text-primary'
@@ -299,8 +301,10 @@ function PromptInput({
             id="ai-mode-improve-btn"
             onClick={() => setMode('improve')}
             disabled={isLoading || disabled}
+            aria-pressed={effectiveMode === 'improve'}
             className={[
               'px-12 py-6 rounded-md text-[12px] font-semibold transition-colors',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
               effectiveMode === 'improve'
                 ? 'bg-primary text-white'
                 : 'text-text-secondary hover:text-text-primary'
@@ -366,7 +370,7 @@ function PromptInput({
             <button
               id="ai-cancel-btn"
               onClick={onCancel}
-              className="px-16 py-8 rounded-lg text-[13px] font-semibold text-text-secondary border border-border hover:text-text-primary hover:bg-border/50 transition-all duration-200"
+              className="px-16 py-8 rounded-lg text-[13px] font-semibold text-text-secondary border border-border hover:text-text-primary hover:bg-border/50 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-border focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               Cancel
             </button>
@@ -379,6 +383,7 @@ function PromptInput({
             className={[
               'flex items-center gap-8 px-16 py-8 rounded-lg text-[13px] font-semibold',
               'transition-all duration-200',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
               canSubmit
                 ? 'bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md'
                 : 'bg-surface-elevated text-disabled cursor-not-allowed border border-border'
@@ -587,7 +592,7 @@ export function Editor(): React.JSX.Element {
                   <button
                     id="ai-candidate-accept-btn"
                     onClick={acceptAiCandidate}
-                    className="flex-1 flex items-center justify-center gap-8 px-16 py-10 rounded-lg text-[13px] font-semibold bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md transition-all duration-200"
+                    className="flex-1 flex items-center justify-center gap-8 px-16 py-10 rounded-lg text-[13px] font-semibold bg-primary text-white hover:bg-primary/90 shadow-sm hover:shadow-md transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     <CheckSquare className="w-4 h-4" />
                     Accept
@@ -595,7 +600,7 @@ export function Editor(): React.JSX.Element {
                   <button
                     id="ai-candidate-discard-btn"
                     onClick={discardAiCandidate}
-                    className="flex-1 flex items-center justify-center gap-8 px-16 py-10 rounded-lg text-[13px] font-semibold bg-surface-elevated text-text-primary border border-border hover:bg-border/50 transition-all duration-200"
+                    className="flex-1 flex items-center justify-center gap-8 px-16 py-10 rounded-lg text-[13px] font-semibold bg-surface-elevated text-text-primary border border-border hover:bg-border/50 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-border focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   >
                     <XCircle className="w-4 h-4" />
                     Discard

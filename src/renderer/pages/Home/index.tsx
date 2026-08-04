@@ -48,6 +48,12 @@ export function Home(): React.JSX.Element {
     title: string
   } | null>(null)
 
+  // Tracks which specific recent-project row is being opened, purely for
+  // display — projectOpening (global) still gates the actual disabled state
+  // so a second open cannot start mid-flight. Without this, every row would
+  // show a spinner while only one project is actually being opened.
+  const [openingPath, setOpeningPath] = React.useState<string | null>(null)
+
   const connectedBoard = hardware.connectedBoards[0] ?? null
   const portCount = hardware.ports.length
 
@@ -61,9 +67,14 @@ export function Home(): React.JSX.Element {
   // elsewhere in this store.
   // ---------------------------------------------------------------------------
   async function handleOpenRecent(filePath: string): Promise<void> {
-    await openProject(filePath)
-    if (useAppStore.getState().projectOpenError === null) {
-      void navigate('/editor')
+    setOpeningPath(filePath)
+    try {
+      await openProject(filePath)
+      if (useAppStore.getState().projectOpenError === null) {
+        void navigate('/editor')
+      }
+    } finally {
+      setOpeningPath(null)
     }
   }
 
@@ -197,9 +208,9 @@ export function Home(): React.JSX.Element {
                       type="button"
                       disabled={projectOpening}
                       onClick={() => void handleOpenRecent(entry.filePath)}
-                      className="flex-1 flex items-center gap-12 min-w-0 text-left disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="flex-1 flex items-center gap-12 min-w-0 text-left rounded-lg disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     >
-                      {projectOpening ? (
+                      {openingPath === entry.filePath ? (
                         <Loader2 className="w-4 h-4 shrink-0 text-text-secondary animate-spin" />
                       ) : (
                         <FolderOpen className="w-4 h-4 shrink-0 text-text-secondary" />
@@ -226,7 +237,7 @@ export function Home(): React.JSX.Element {
                         onClick={() =>
                           setPendingDelete({ filePath: entry.filePath, title: entry.title })
                         }
-                        className="text-disabled hover:text-error transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:pointer-events-none"
+                        className="text-disabled hover:text-error transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:pointer-events-none rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-error focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

@@ -135,7 +135,12 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
         {/* Left Section - Page Title & Breadcrumb */}
         <div className="flex items-center gap-12 flex-1 min-w-0">
           <div className="flex items-center text-disabled text-[14px] font-medium tracking-wide">
-            <span className="hover:text-white cursor-pointer transition-colors">IoTOS AI</span>
+            <NavLink
+              to="/"
+              className="hover:text-white transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+            >
+              IoTOS AI
+            </NavLink>
             <ChevronRight className="w-4 h-4 mx-4 opacity-50" />
             <span className="text-white">{currentPage?.label || 'Dashboard'}</span>
           </div>
@@ -204,8 +209,8 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
               size="sm"
               className={
                 canSave
-                  ? 'h-[32px] transition-all duration-300'
-                  : 'h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300'
+                  ? '!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap transition-all duration-300'
+                  : '!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300'
               }
               leftIcon={<Save className="w-4 h-4" />}
               isLoading={projectSaving}
@@ -225,7 +230,7 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
             <Button
               variant="ghost"
               size="sm"
-              className="h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+              className="!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
               leftIcon={<Sparkles className="w-4 h-4" />}
               disabled
             >
@@ -239,8 +244,8 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
               size="sm"
               className={
                 canUpload
-                  ? 'h-[32px] transition-all duration-300'
-                  : 'h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300'
+                  ? '!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap transition-all duration-300'
+                  : '!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300'
               }
               leftIcon={<Upload className="w-4 h-4" />}
               isLoading={uploadLoading}
@@ -254,7 +259,7 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
             <Button
               variant="ghost"
               size="sm"
-              className="h-[32px] text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+              className="!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
               leftIcon={<Play className="w-4 h-4" />}
               disabled
             >

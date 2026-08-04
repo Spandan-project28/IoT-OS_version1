@@ -79,14 +79,38 @@ export function DeleteConfirmModal({
   onError
 }: DeleteConfirmModalProps): React.JSX.Element | null {
   const [isDeleting, setIsDeleting] = React.useState(false)
+  const dialogRef = React.useRef<HTMLDivElement>(null)
 
-  // Keyboard handler: Escape → cancel
+  // Focus management: move focus into the dialog on open (to the least
+  // destructive action, Cancel) and trap Tab within it while open, so a
+  // keyboard user can never Tab out to the page behind the backdrop —
+  // required for aria-modal="true" to actually behave as advertised.
+  // Escape still cancels, unless a delete is in-flight.
   React.useEffect(() => {
     if (!isOpen) return
+
+    document.getElementById('delete-modal-cancel-btn')?.focus()
 
     function handleKeyDown(e: KeyboardEvent): void {
       if (e.key === 'Escape' && !isDeleting) {
         onCancel()
+        return
+      }
+
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+        if (focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
       }
     }
 
@@ -129,6 +153,7 @@ export function DeleteConfirmModal({
     >
       {/* Modal card */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-modal-title"
@@ -141,7 +166,7 @@ export function DeleteConfirmModal({
           aria-label="Cancel and close"
           disabled={isDeleting}
           onClick={onCancel}
-          className="absolute top-16 right-16 text-disabled hover:text-white transition-colors disabled:opacity-40"
+          className="absolute top-16 right-16 text-disabled hover:text-white transition-colors disabled:opacity-40 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-surface"
         >
           <X className="w-4 h-4" />
         </button>

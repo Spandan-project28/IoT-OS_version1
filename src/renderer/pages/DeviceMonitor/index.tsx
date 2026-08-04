@@ -123,7 +123,7 @@ export function DeviceMonitor(): React.JSX.Element {
         {/* ----------------------------------------------------------------
             Stat cards row
         ---------------------------------------------------------------- */}
-        <div className="grid grid-cols-3 gap-24 shrink-0">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-24 shrink-0">
           {/* Board status card */}
           <Card className="p-24 flex items-center gap-20">
             <div className="w-12 h-12 rounded-full bg-surface-elevated flex items-center justify-center text-text-secondary border border-border shadow-sm shrink-0">
@@ -279,7 +279,7 @@ export function DeviceMonitor(): React.JSX.Element {
         <Panel
           title="Serial Console"
           action={
-            <div className="flex items-center gap-12">
+            <div className="flex items-center gap-12 flex-wrap justify-end">
               {/* Baud Rate selector — disabled while a session is open */}
               <select
                 className="bg-surface border border-border rounded-lg px-8 py-4 text-[12px] font-mono text-text-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -318,6 +318,7 @@ export function DeviceMonitor(): React.JSX.Element {
                 size="sm"
                 onClick={toggleSerialAutoScroll}
                 title="Toggle Auto Scroll"
+                aria-pressed={serialAutoScroll}
                 leftIcon={
                   <ArrowDown className={`w-3.5 h-3.5 ${serialAutoScroll ? 'text-primary' : ''}`} />
                 }

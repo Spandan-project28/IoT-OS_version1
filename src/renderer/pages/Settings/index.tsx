@@ -119,7 +119,7 @@ export function Settings(): React.JSX.Element {
                     value={apiUrl}
                     onChange={(e) => setApiUrl(e.target.value)}
                     placeholder="https://api.openai.com/v1"
-                    className="w-full bg-surface border border-border rounded-xl px-16 py-10 text-[14px] text-text-primary focus:outline-none placeholder:text-text-secondary/50 shadow-sm"
+                    className="w-full bg-surface border border-border rounded-xl px-16 py-10 text-[14px] text-text-primary focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-text-secondary/50 shadow-sm"
                   />
                 </div>
 
@@ -132,7 +132,7 @@ export function Settings(): React.JSX.Element {
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
                     placeholder="gpt-4o-mini"
-                    className="w-full bg-surface border border-border rounded-xl px-16 py-10 text-[14px] text-text-primary focus:outline-none placeholder:text-text-secondary/50 shadow-sm"
+                    className="w-full bg-surface border border-border rounded-xl px-16 py-10 text-[14px] text-text-primary focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-text-secondary/50 shadow-sm"
                   />
                 </div>
 
@@ -150,7 +150,7 @@ export function Settings(): React.JSX.Element {
                           ? 'Enter a new key to replace the saved one'
                           : '(Not configured)'
                       }
-                      className="flex-1 bg-surface border border-border rounded-xl px-16 py-10 text-[14px] text-text-primary focus:outline-none placeholder:text-text-secondary/50 shadow-sm"
+                      className="flex-1 bg-surface border border-border rounded-xl px-16 py-10 text-[14px] text-text-primary focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-text-secondary/50 shadow-sm"
                     />
                     {aiConfig?.hasApiKey && (
                       <Button
