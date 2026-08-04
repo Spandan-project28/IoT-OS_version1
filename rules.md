@@ -2,7 +2,7 @@
 
 **Document:** rules.md
 
-**Version:** 1.1
+**Version:** 1.2
 
 **Status:** Mandatory
 
@@ -363,7 +363,88 @@ Features alone are not success.
 
 ---
 
-# 26. Final Rule
+# 26. Phase 9 — Project Governance Rules
+
+This section governs implementation of the project-centric workflow
+defined in the frozen Phase 9 Product Vision, PRD.md, ARCHITECTURE.md,
+DESIGN.md, and PHASES.md. It supplements the rules above; it does not
+replace or relax any of them.
+
+## Project Model
+
+- There must always be exactly one editable project model:
+  `IProjectDocument`. No creation path may introduce a second document
+  shape, a specialized service, or a specialized persistence format.
+- Templates are never editable. A template is a reusable definition;
+  selecting one produces an independent, editable project. The template
+  itself is never opened or modified.
+
+## Project Origin
+
+- `ProjectOrigin` is assigned automatically at creation and is
+  immutable. No code path may set, change, or expose it as
+  user-editable.
+- Runtime behavior must never branch on `ProjectOrigin`, in any layer,
+  unless a future approved specification explicitly introduces such
+  behavior. Its only permitted observable use is a presentation label
+  (for example, an origin badge) in the Renderer.
+
+## Manual, Template, and AI-Generated Projects
+
+- Manual, Template, and AI-generated projects must converge into the
+  same `IProjectDocument` model, differing only in how their initial
+  fields are populated — never in shape, lifecycle, persistence, or
+  service ownership.
+- No duplicate project-creation pipelines: a new origin must reuse the
+  existing construction-and-atomic-state-replacement pattern already
+  established by template selection, not introduce a parallel one.
+- The existing template workflow (gallery, selection, and its current
+  behavior) must remain unchanged by Phase 9 work.
+- Open Existing Project must reuse the existing project-opening
+  pipeline (`project:open` → `ProjectService.open()`) unchanged. It may
+  add a new, Main-process-only entry point for obtaining a file path
+  (a native picker); it must not introduce a second opening pipeline.
+
+## Project Lifecycle
+
+- A project may exist entirely in memory before it exists on disk. No
+  origin may perform an eager or origin-specific write at creation
+  time; persistence happens only through the existing save pipeline.
+- Save, Autosave, Upload, and Device Monitor operate on
+  `IProjectDocument` alone and must never read or branch on
+  `ProjectOrigin`.
+
+## Project Ownership, UI Ownership, and Responsibilities
+
+- **Renderer** constructs every `IProjectDocument`, regardless of
+  origin, and owns temporary UI state — for example, popup-menu open
+  state and dialog form fields — as local component state, never
+  Zustand, consistent with § State Management.
+- **Zustand** holds only application-wide project state (the current
+  document, dirty flag, current path). It never holds transient UI
+  state belonging to a single component.
+- **IPC** remains orchestration only. A handler that obtains a file
+  path or any other OS-level value must do exactly that and nothing
+  else — it must never embed business logic or call a service on the
+  Renderer's behalf beyond what was explicitly requested.
+- **Services** own all business logic. `ProjectService` remains the
+  sole owner of reading and writing project files; no new persistence
+  path, file format, or storage mechanism may be introduced.
+- No service may call another service directly — this generalizes the
+  same service-isolation principle already present in § Architecture
+  Rules ("AI never uploads firmware," "UploadService never generates
+  firmware") and applies equally to `ProjectService` and every other
+  service.
+
+## Out of Scope
+
+The Phase 9 exclusion list is defined once, in PHASES.md, and is
+authoritative there. Do not implement anything on that list on the
+belief that this document permits it.
+
+---
+
+# 27. Final Rule
 
 Every engineering decision must strengthen one promise:
 

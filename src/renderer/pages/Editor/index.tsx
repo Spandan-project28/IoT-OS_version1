@@ -58,7 +58,7 @@ import {
 import React from 'react'
 import { NavLink } from 'react-router-dom'
 import type { IAIGenerateRequest, AIErrorCode } from '@shared/types/ai'
-import type { IProjectDocument } from '@shared/types/project'
+import type { IProjectDocument, ProjectOrigin } from '@shared/types/project'
 
 // ---------------------------------------------------------------------------
 // AssistantSection — reusable info card
@@ -411,6 +411,14 @@ function PromptInput({
 // Editor page
 // ---------------------------------------------------------------------------
 
+// Exhaustive over ProjectOrigin — adding a new origin without a label here
+// fails typecheck instead of silently falling through.
+const ORIGIN_LABELS: Record<ProjectOrigin, string> = {
+  template: 'Template',
+  ai: 'AI Generated',
+  manual: 'Manual'
+}
+
 export function Editor(): React.JSX.Element {
   const {
     currentProjectDoc,
@@ -454,11 +462,7 @@ export function Editor(): React.JSX.Element {
   const firmwareSource = currentProjectDoc?.firmware ?? undefined
 
   // Determines the origin badge text shown beside the project title.
-  const originLabel = currentProjectDoc
-    ? currentProjectDoc.metadata.origin === 'ai'
-      ? 'AI Generated'
-      : 'Template'
-    : null
+  const originLabel = currentProjectDoc ? ORIGIN_LABELS[currentProjectDoc.metadata.origin] : null
 
   return (
     <div className="flex flex-col h-full bg-background">

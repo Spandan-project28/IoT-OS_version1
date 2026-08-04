@@ -4,7 +4,7 @@
 
 **Document:** Design System & UX Specification
 
-**Version:** 2.0
+**Version:** 2.1
 
 **Status:** Source of Truth
 
@@ -622,6 +622,356 @@ Mobile is out of scope for V0.1.
 - Use inconsistent spacing.
 - Use decorative animations.
 - Expose implementation details.
+
+---
+
+# 42. Phase 9 — Projects Page Extension
+
+Phase 9 extends the Projects page. It does not redesign it.
+
+The existing Template Gallery is unchanged:
+
+- Same grid, same cards, same spacing, same visual language.
+- Selecting a template still opens a new editable project in the Editor
+  immediately — no dialog, no confirmation.
+
+One new control is added to the page header: a "+" action.
+
+---
+
+# 43. Phase 9 — "+" Action
+
+Placement:
+
+- Page header, aligned opposite the page title, at the same vertical
+  position as the existing header row.
+
+Size:
+
+- Matches the existing compact button size already used for header-row
+  actions elsewhere in the application.
+
+Iconography:
+
+- A Plus icon (Lucide), paired with the visible label "New." Per §
+  Icons, icons support labels; they never replace them.
+
+Interaction states:
+
+- Default, Hover, Focus, Active — identical to the existing Button
+  states already defined in § Buttons.
+- No Disabled state. The action is always available on the Projects
+  page.
+- No Loading state. Opening the menu is instantaneous.
+
+Accessibility:
+
+- Accessible name: "New Project."
+- Announces that it controls a popup, and whether that popup is
+  currently open.
+- Operable with Enter and Space, like any button.
+
+Keyboard navigation:
+
+- Reachable by Tab in the page's natural header order.
+- A visible focus ring, matching every other interactive control in the
+  application.
+
+---
+
+# 44. Phase 9 — Popup Menu
+
+A lightweight, non-blocking popup — not a modal (§ Modals). It never
+dims or blocks the rest of the page.
+
+Contents: exactly two items.
+
+- Create New Project
+- Open Existing Project
+
+No further items. No submenus.
+
+Positioning:
+
+- Anchored directly below the "+" action, aligned so it never overflows
+  the page edge.
+
+Spacing:
+
+- Uses the existing spacing scale (§ Spacing System) and the existing
+  list and card surface language (§ Lists, § Cards) — rounded corners,
+  soft elevation, consistent item padding. No new visual style is
+  introduced.
+
+Dismissal:
+
+- Selecting an item closes the menu and performs that action.
+- Clicking outside the menu closes it without any action.
+- Escape closes it without any action.
+
+Keyboard interaction:
+
+- Arrow Down / Arrow Up moves between the two items.
+- Enter or Space activates the focused item.
+- Escape closes the menu.
+
+Focus restoration:
+
+- Escape or click-outside returns focus to the "+" action.
+- Choosing an item moves focus into what opens next — the Create New
+  Project dialog, or the native file picker — not back to "+" first.
+
+---
+
+# 45. Phase 9 — Create New Project Dialog
+
+A modal, per § Modals: reserved for high-impact actions. The popup menu
+always fully closes before this dialog opens — dialogs are never
+stacked.
+
+Visually consistent with the existing confirmation-dialog pattern
+already used elsewhere in the application: a centered card over a
+dimmed backdrop, a close control, a clear title, form content, and two
+footer actions (Cancel, Create).
+
+Fields, in order:
+
+1. **Project Name** — a text field. Empty by default, with a helpful
+   placeholder example. Required.
+2. **Target Board** — a dropdown of the supported boards (§ Dropdowns:
+   keyboard accessible, predictable ordering; not search-enabled, since
+   the list is short). No board is pre-selected. Required.
+3. **Storage Location** — pre-filled with the default project location.
+   An adjacent action lets the user choose a different location via the
+   platform's native picker. Always has a value; never empty.
+
+Buttons:
+
+- **Cancel** — secondary style, positioned first.
+- **Create** — primary style, positioned second. Disabled until Project
+  Name is non-empty and Target Board has a selection.
+- A dialog close control (matching the existing close-control pattern
+  already used by the application's other dialogs) is also present and
+  behaves identically to Cancel.
+
+Validation:
+
+- Project Name: required, non-empty.
+- Target Board: required, must be one of the supported boards.
+- Storage Location: always valid; the default requires no user action.
+
+Empty states:
+
+- Project Name shows a placeholder example, not a pre-filled value.
+- Target Board shows a neutral "Select a board" prompt until chosen.
+
+Default values:
+
+- Storage Location defaults to the standard project location.
+- Project Name and Target Board have no default; both require explicit
+  input.
+
+Keyboard shortcuts:
+
+- Enter submits when the form is valid.
+- Escape cancels and closes the dialog, identical in effect to Cancel.
+
+Closing behavior (UX invariant):
+
+- Cancel, Escape, and the dialog close control all close the dialog
+  identically: every entered value is discarded, without a confirmation
+  step.
+- Opening the dialog again always starts from a fresh, empty form. No
+  previously entered value is ever retained or restored.
+
+Error presentation (§ Error States):
+
+- If creation cannot complete, an inline message appears inside the
+  dialog: what went wrong, in plain language, with a suggested next
+  step. The dialog stays open so the user can correct the problem
+  without re-entering their other fields.
+
+Loading state:
+
+- Creating a project does not involve a lengthy operation, so no
+  loading spinner is needed for the Create action itself. Only the
+  native location picker, if opened, has its own, platform-owned
+  transition.
+
+Focus order:
+
+- Project Name (focused automatically when the dialog opens) → Target
+  Board → Storage Location / its picker action → Cancel → Create. The
+  dialog close control participates in the same cycle; focus never
+  escapes the dialog while it is open.
+
+Responsive behavior:
+
+- Fixed, centered dialog width appropriate for desktop and large-laptop
+  targets, matching § Responsive Strategy. No mobile-specific layout is
+  defined.
+
+On success:
+
+- The dialog closes and the Editor opens immediately with the new,
+  empty project active — the same transition as opening a template.
+
+---
+
+# 46. Phase 9 — Open Existing Project
+
+UX only. No persistence or file-format detail belongs in this document.
+
+Menu interaction:
+
+- Selecting "Open Existing Project" closes the popup menu and
+  immediately presents the platform's native file picker. No
+  intermediate IoTOS dialog appears first.
+
+Native picker transition:
+
+- The native picker is owned by the operating system. IoTOS shows no
+  custom loading state while it is open.
+
+Cancellation:
+
+- Dismissing the native picker without choosing a file is not an error.
+  The user returns to the Projects page exactly as they left it — no
+  message, no side effect.
+
+Successful open:
+
+- Choosing a valid project file opens the Editor with that project
+  active — the same transition already used when opening a project from
+  Recent Projects.
+
+Unsuccessful open:
+
+- If the chosen file cannot be opened, the user remains on the Projects
+  page and sees an inline error message following § Error States: what
+  went wrong, in plain language, with a suggested next step.
+
+---
+
+# 47. Phase 9 — Official Template Cards
+
+The existing Template Gallery cards are unchanged by Phase 9.
+
+Do not:
+
+- Redesign the card layout, spacing, or visual style.
+- Introduce user-created or user-saved templates.
+- Introduce categories.
+- Introduce search.
+- Introduce filtering.
+
+The "+" action and its menu are the only additions to this page. (The
+separately-scoped § Project Cards section describes a different,
+existing card concept and is unaffected by Phase 9.)
+
+---
+
+# 48. Phase 9 — User Journeys
+
+Template path (unchanged):
+
+```
+Projects Page
+ ↓
+Template
+ ↓
+Editor
+```
+
+New project path:
+
+```
+Entry
+ ↓
+Projects Page
+ ↓
++
+ ↓
+Menu
+ ↓
+Create New Project
+ ↓
+Editor
+```
+
+Open existing path:
+
+```
+Projects Page
+ ↓
++
+ ↓
+Open Existing
+ ↓
+Editor
+```
+
+All three journeys end at the same place: the Editor, with an active
+project. From the Editor onward, nothing about the experience differs
+by how the project was created.
+
+---
+
+# 49. Phase 9 Accessibility
+
+Applies § Accessibility concretely to the new controls.
+
+Keyboard navigation:
+
+- Every new control ("+", popup menu, dialog) is fully operable without
+  a mouse.
+
+Focus order:
+
+- "+" → popup menu items → dialog fields (see § Create New Project
+  Dialog) or the native picker, which is platform-controlled.
+
+Tab order:
+
+- Follows visual order at every step; never skips or traps focus,
+  except while the dialog is open, where Tab cycles only within that
+  dialog until it closes.
+
+Screen reader labels:
+
+- "+" announces as "New Project."
+- Each menu item announces its full label: "Create New Project," "Open
+  Existing Project."
+- The dialog announces its title and is identified as a dialog when it
+  opens.
+- The dialog close control has its own accessible name, matching the
+  existing close-control pattern already used by the application's
+  other dialogs.
+
+Escape behavior:
+
+- Closes the popup menu, or the dialog, and returns focus to the
+  control that opened it.
+
+Enter behavior:
+
+- Activates the focused menu item, or submits the dialog when valid.
+
+---
+
+# 50. Phase 9 — Out of Scope
+
+Do not introduce:
+
+- User Templates
+- Template Editing
+- Import Systems
+- Git
+- Cloud
+- Workspace Manager
+- Multiple Projects
+- Recent Project redesign
+- Project Explorer redesign
 
 ---
 

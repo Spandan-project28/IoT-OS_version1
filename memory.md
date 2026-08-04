@@ -2,7 +2,7 @@
 
 **Project:** IoTOS AI  
 **Document:** Project Memory & Engineering Journal  
-**Version:** 2.0  
+**Version:** 2.1  
 **Status:** Living Document
 
 ---
@@ -147,6 +147,77 @@ Never duplicate information from the other documentation. Record changes and rea
 - **Reason:** Zustand's selector optimisation depends on referential equality. Mutating nested properties bypasses Zustand's change detection, causing stale UI.
 - **Consequences:** Every action that updates `currentProjectDoc` must replace the entire object. No property can be updated in isolation.
 
+### ADR-017
+
+- **Status:** Accepted
+- **Decision:** IoTOS AI evolves from a template-first application to a project-centric one. The project (`IProjectDocument`) is the primary editable unit; a template is one of three ways to create one, alongside AI generation and manual creation.
+- **Reason:**
+  - Template-only creation limited every new project to one of three fixed starting points.
+  - Treating the project as the primary unit lets the product add new creation paths without inventing a new document shape or a divergent Editor code path — every path still terminates at the same `IProjectDocument` established by ADR-010.
+- **Trade-offs considered:**
+  - Keeping templates as the primary unit and treating manual and AI creation as template variants was rejected — it would have required inventing a "no-op template," an awkward fit for a project with no starting content.
+- **Consequences:** Extends ADR-010. `IProjectDocument` remains the single runtime model; only the number of paths that construct one grows.
+
+### ADR-018
+
+- **Status:** Accepted
+- **Decision:** `ProjectOrigin` (`template` | `ai` | `manual`) is assigned automatically at project creation, is immutable, and is metadata only. It may be shown as a presentation label but must never gate behavior, capability, or permission.
+- **Reason:**
+  - A project-centric model with multiple creation paths needs a way to record provenance for display (for example, an origin badge) without letting that provenance fragment the product into per-origin feature sets.
+  - Making it immutable and behavior-inert keeps every project's capabilities identical after creation, regardless of how it started.
+- **Trade-offs considered:**
+  - Allowing `ProjectOrigin` to gate future behavior (for example, origin-specific tooling) was explicitly rejected — this would recreate the same fragmentation the project-centric model was designed to avoid.
+- **Consequences:** No subsystem — Renderer, IPC, or Service — may branch on `ProjectOrigin` unless a future specification explicitly introduces such behavior.
+
+### ADR-019
+
+- **Status:** Accepted
+- **Decision:** Manual project creation and Open Existing Project both reuse existing pipelines rather than introducing new ones. Manual creation follows the same Renderer-side construction and atomic state-replacement pattern already established by `selectTemplate()`; Open Existing Project reuses the existing `project:open` IPC channel and `ProjectService.open()`, adding only a Main-process-only native file picker as a new entry point.
+- **Reason:**
+  - Every project, regardless of origin, must converge on the same `IProjectDocument` before reaching the Editor and pass through the same Save / Autosave / Upload / Monitor pipeline — a second construction or opening pipeline for any origin would duplicate logic the product already has.
+  - Reusing `project:open` meant Open Existing Project required no new persistence path — it is a new discovery entry point (a file picker on the Projects page), not a new capability.
+- **Trade-offs considered:**
+  - Constructing manual and template projects via a new Main-process IPC channel (a `project:new` handler) was considered and rejected in favor of the existing Renderer-only construction pattern — the binding requirement is that every path converges on the same document, not which layer performs the construction; that mechanism may still evolve later without breaking the invariant.
+- **Consequences:** No `project:new` channel exists or is needed. `ProjectService` gained zero new methods for Phase 9.
+
+---
+
+# Phase 9 — Project-Centric Evolution
+
+This section records the historical context and product reasoning behind Phase 9. It is a summary of decisions already made and frozen in the Product Vision, PRD.md, ARCHITECTURE.md, DESIGN.md, and PHASES.md — not a restatement of their specifications.
+
+## From the Original V0.1 Roadmap
+
+PHASES.md's original Phase 9 targeted stabilization testing for the V0.1 investor demo. Development continued past that scope — Project Persistence (the real Phase 7) and AI Settings, Review, and Improve (the real Phase 8) shipped first, each closing with its own stabilization slice, fulfilling the original Phase 9 intent without a standalone testing phase. The current Phase 9, the project-centric workflow, is the next evolution beyond that point, not a renumbering of the same work. PHASES.md retitles the original section "(Original V0.1 Roadmap — Superseded)" and preserves it in full for historical continuity.
+
+## Why Templates Remain Unchanged
+
+The Product Vision, PRD.md, and DESIGN.md all preserve the existing template gallery and selection flow exactly as it was — the fastest path for a beginner remains exactly as fast and exactly unchanged. Beginners are the product's primary audience, and the template path is the product's proven, lowest-friction entry point. Project-centricity was designed to add optionality around that path, not to alter or gate it.
+
+## Why Manual Project Creation Was Added
+
+A project-centric model requires that a project can exist without first going through a template or an AI prompt. Manual creation gives a user who already knows what they want to build — or who simply wants an empty starting point — a direct way to create a project, without a template or an AI round trip standing in the way.
+
+## Why Open Existing Project Became a First-Class Entry Point
+
+Before Phase 9, opening a previously saved project was reachable only through the Recent Projects list, which requires the project to already be in that history. Open Existing Project promotes the underlying, already-existing `project:open` capability to a discoverable, first-class action on the Projects page, so a user can browse for and open any project file directly, including ones outside their recent history.
+
+## Why Template, AI, and Manual Projects Converge into the Same Lifecycle
+
+All three origins construct the same `IProjectDocument` and, from that point forward, are indistinguishable to Save, Autosave, Upload, and Device Monitor. Maintaining separate lifecycles per origin would have duplicated logic the product already had working reliably for template and AI projects, and would have made the Editor origin-aware in a way ADR-010 already ruled out.
+
+## Why the Following Were Intentionally Excluded from Phase 9
+
+- User Templates
+- Template Editing
+- Git
+- Cloud
+- Import Systems
+- Workspace Manager
+- Multiple Projects
+
+Each would expand the product beyond a single, local, project-centric workflow — into template authorship, version control, remote infrastructure, third-party project formats, multi-root workspace management, or multi-project sessions. None were necessary to let a project be created three ways and opened directly. Consistent with PRD.md's Product Philosophy ("Does this make embedded development easier for beginners?") and RULES.md's Scope Discipline ("Feature creep is considered a defect"), they were deferred rather than bundled into Phase 9.
+
 ---
 
 # Locked Decisions
@@ -162,14 +233,25 @@ Do not revisit during V0.1:
 - No Marketplace
 - No Mobile App
 
+## Phase 9
+
+Do not revisit during Phase 9:
+
+- No User Templates or Template Editing
+- No Git-based project workflows
+- No Cloud-hosted projects
+- No Import Systems (Arduino Sketch, PlatformIO)
+- No Workspace Manager
+- No Multiple simultaneously open projects
+
 ---
 
 # Current Status
 
-- **Current Phase:** Phase 6: AI Firmware Generation — **COMPLETE**
-- **Current Milestone:** M6 complete — Full AI Firmware Generation pipeline (Slices 22–27)
-- **Overall Progress:** Phase 1 (100%), Phase 2 (100%), Phase 3 (100%), Phase 4 (100%), Phase 5 (100%), Phase 6 (100%)
-- **Last Updated:** July 27, 2026
+- **Current Phase:** Phase 8: AI Settings, Review & Improve — **COMPLETE**
+- **Current Milestone:** M8 complete — Full AI Settings, Review & Improve pipeline (Slices 35–40), following M7 — Project Persistence (Slices 28–34)
+- **Overall Progress:** Phase 1 (100%), Phase 2 (100%), Phase 3 (100%), Phase 4 (100%), Phase 5 (100%), Phase 6 (100%), Phase 7 (100%), Phase 8 (100%)
+- **Last Updated:** August 5, 2026
 
 ---
 

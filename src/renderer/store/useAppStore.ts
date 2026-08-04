@@ -88,7 +88,7 @@ import type {
   ISerialDataPayload,
   ISerialStatusPayload
 } from '@shared/types/serial'
-import type { ITemplateDefinition } from '@shared/types/template'
+import type { ITemplateDefinition, SupportedBoard } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 import type { IAIGenerateRequest, AIErrorCode } from '@shared/types/ai'
 import type { IRecentProject, IProjectSavedPayload, IProjectDeleteResult } from '@shared/types/project-persistence'
@@ -1019,6 +1019,32 @@ export interface AppState {
    * @param template - The template the user chose from the Template Gallery.
    */
   selectTemplate: (template: ITemplateDefinition) => void
+
+  // -------------------------------------------------------------------------
+  // Manual Project Actions (Phase 9, Slice 2)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Constructs a brand-new, empty IProjectDocument with origin 'manual' and
+   * replaces the active project atomically (Phase 9, Slice 2).
+   *
+   * Mirrors selectTemplate() exactly: constructs metadata (origin + createdAt,
+   * no generator/provider/model — those are AI-only), constructs a fresh
+   * IProjectDocument with a new id and schemaVersion 1, cancels any pending
+   * autosave debounce, then replaces currentProjectDoc and resets
+   * aiError / projectDirty / currentProjectPath / pendingAiCandidate /
+   * pendingAiCandidateMode in a single atomic set() call.
+   *
+   * Pure synchronous action. No IPC. No validation of `name` — the caller
+   * (the Create New Project dialog, Slice 4) is responsible for supplying a
+   * valid, non-empty name before calling this action, exactly as the
+   * Template Gallery is responsible for only ever passing a valid template
+   * to selectTemplate().
+   *
+   * @param name - The project title, used verbatim as `title`.
+   * @param boardHint - The target board selected during creation, or null.
+   */
+  createManualProject: (name: string, boardHint: SupportedBoard | null) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,9 +1115,10 @@ let _autosaveDebounceTimer: ReturnType<typeof setTimeout> | null = null
  * is set. A no-op if none is pending.
  *
  * Called whenever the active project changes (openProject, selectTemplate,
- * acceptAiCandidate, clearProject, deleteProject) or is superseded by a
- * manual save (saveProject, saveAsProject), so a timer scheduled against one
- * project/state can never fire against a different, subsequently active one.
+ * createManualProject, acceptAiCandidate, clearProject, deleteProject) or is
+ * superseded by a manual save (saveProject, saveAsProject), so a timer
+ * scheduled against one project/state can never fire against a different,
+ * subsequently active one.
  *
  * Extracted (Phase 7, Slice 34) to replace six previously-duplicated inline
  * copies of this exact logic — purely a de-duplication, no behavior change.
@@ -1788,6 +1815,52 @@ export const useAppStore = create<AppState>((set, get) => ({
       currentProjectPath: null,
       // A pending candidate belongs to whatever project was active before —
       // it must never be accepted onto this newly selected template.
+      pendingAiCandidate: null,
+      pendingAiCandidateMode: null
+    })
+  },
+
+  // -------------------------------------------------------------------------
+  // Manual Project Actions (Phase 9, Slice 2)
+  // -------------------------------------------------------------------------
+
+  createManualProject: (name: string, boardHint: SupportedBoard | null) => {
+    // Mirrors selectTemplate()'s construction exactly (ADR-016): all fields
+    // are set at construction time; no in-place mutation.
+    const metadata: IProjectMetadata = {
+      origin: 'manual',
+      createdAt: new Date().toISOString()
+      // generator, provider, model are intentionally absent — they are only
+      // meaningful for AI-generated projects.
+    }
+
+    const projectDoc: IProjectDocument = {
+      id: nanoid(),
+      schemaVersion: 1,
+      title: name,
+      description: '',
+      firmware: '',
+      explanation: null,
+      components: [],
+      wiring: null,
+      expectedOutput: '',
+      boardHint,
+      metadata
+    }
+
+    // The active project is changing — cancel any pending autosave debounce
+    // so it can never fire against the manual project being created now.
+    cancelPendingAutosave()
+
+    set({
+      currentProjectDoc: projectDoc,
+      // Clear any stale AI error from a previous generation attempt.
+      aiError: null,
+      // A freshly created manual project is never dirty and has no saved path.
+      projectDirty: false,
+      currentProjectPath: null,
+      // A pending candidate belongs to whatever project was active before —
+      // it must never be accepted onto this newly created project.
       pendingAiCandidate: null,
       pendingAiCandidateMode: null
     })

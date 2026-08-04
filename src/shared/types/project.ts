@@ -75,8 +75,10 @@ export type ProjectSchemaVersion = 1
  *
  * - 'template' — project was created by selecting a built-in template
  * - 'ai'       — project was created by AI firmware generation
+ * - 'manual'   — project was created directly by the user, with no template
+ *                or AI generation involved
  */
-export type ProjectOrigin = 'template' | 'ai'
+export type ProjectOrigin = 'template' | 'ai' | 'manual'
 
 /**
  * Provenance and creation metadata for a project document.
@@ -94,7 +96,7 @@ export interface IProjectMetadata {
    * The source that produced this project document.
    *
    * Used by the UI to render the correct origin badge
-   * ('Template' vs 'AI Generated') in the Editor.
+   * ('Template', 'AI Generated', or 'Manual') in the Editor.
    */
   readonly origin: ProjectOrigin
 
