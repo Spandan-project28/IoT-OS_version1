@@ -19,12 +19,13 @@
 import { TopBar } from '../../components/layout/TopBar'
 import { TemplateCard } from '../../components/templates/TemplateCard'
 import { NewProjectMenu } from '../../components/projects/NewProjectMenu'
+import { CreateProjectDialog } from '../../components/projects/CreateProjectDialog'
 import { templateRegistry } from '../../domain/templates/registry'
 import { useAppStore } from '../../store/useAppStore'
 import { useNavigate } from 'react-router-dom'
 import { Layers } from 'lucide-react'
 import React from 'react'
-import type { ITemplateDefinition } from '@shared/types/template'
+import type { ITemplateDefinition, SupportedBoard } from '@shared/types/template'
 
 export function Projects(): React.JSX.Element {
   const {
@@ -35,6 +36,7 @@ export function Projects(): React.JSX.Element {
     projectOpenError
   } = useAppStore()
   const navigate = useNavigate()
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false)
 
   function handleSelectTemplate(template: ITemplateDefinition): void {
     selectTemplate(template)
@@ -42,13 +44,16 @@ export function Projects(): React.JSX.Element {
   }
 
   function handleCreateNew(): void {
-    // Delegates directly to the existing createManualProject() action, using
-    // the repository's current default name/board values — an implementation
-    // detail owned by the call site, not part of this slice's contract, and
-    // free to change independently of this specification. Slice 5 replaces
-    // this call site with one driven by a dialog's user-entered values,
-    // calling the exact same action.
-    createManualProject('Untitled Project', null)
+    setIsCreateDialogOpen(true)
+  }
+
+  function handleCreateDialogCancel(): void {
+    setIsCreateDialogOpen(false)
+  }
+
+  function handleCreateDialogCreate(name: string, boardHint: SupportedBoard): void {
+    createManualProject(name, boardHint)
+    setIsCreateDialogOpen(false)
     void navigate('/editor')
   }
 
@@ -101,6 +106,13 @@ export function Projects(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {isCreateDialogOpen && (
+        <CreateProjectDialog
+          onCancel={handleCreateDialogCancel}
+          onCreate={handleCreateDialogCreate}
+        />
+      )}
     </div>
   )
 }
