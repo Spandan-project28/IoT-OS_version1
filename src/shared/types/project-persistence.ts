@@ -77,6 +77,26 @@ export type IProjectOpenResult =
   | { status: 'error'; code: ProjectErrorCode; error: string }
 
 // ---------------------------------------------------------------------------
+// Open Dialog
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of showing the native "Open Project" file picker.
+ *
+ * No request payload — the dialog takes no per-call parameters (unlike Save
+ * As, which needs a suggested title). 'cancelled' is a distinct, non-error
+ * outcome (mirrors IProjectSaveAsResult) — the user dismissing the native
+ * dialog is a normal action. 'error' exists per this file's never-reject IPC
+ * convention, covering the rare case the dialog call itself throws (e.g. a
+ * torn-down BrowserWindow); it is never returned for a missing or unreadable
+ * file — that is project:open's concern once a path is chosen.
+ */
+export type IProjectOpenDialogResult =
+  | { status: 'success'; filePath: string }
+  | { status: 'cancelled' }
+  | { status: 'error'; code: ProjectErrorCode; error: string }
+
+// ---------------------------------------------------------------------------
 // Save
 // ---------------------------------------------------------------------------
 

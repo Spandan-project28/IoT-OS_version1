@@ -18,6 +18,7 @@ import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
 import type {
   IProjectOpenRequest,
   IProjectOpenResult,
+  IProjectOpenDialogResult,
   IProjectSaveRequest,
   IProjectSaveResult,
   IProjectSaveAsRequest,
@@ -212,6 +213,14 @@ export interface IProjectApi {
    * @returns An unsubscribe function. Call it in useEffect cleanup.
    */
   onSaved: (callback: (payload: IProjectSavedPayload) => void) => () => void
+
+  /**
+   * Shows the native "Open Project" file picker (Phase 9, Slice 3) and
+   * returns the chosen path, a cancellation, or a picker-level error. Never
+   * reads or opens the file itself — pass the returned filePath to
+   * openProject() (Zustand) / window.api.project.open() to do that.
+   */
+  openDialog: () => Promise<IProjectOpenDialogResult>
 }
 
 export interface ISettingsApi {

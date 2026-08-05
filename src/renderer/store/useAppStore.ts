@@ -772,6 +772,35 @@ export interface AppState {
    */
   openProject: (filePath: string) => Promise<void>
 
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 9, Slice 3)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Opens a project chosen via the native "Open Project" file picker
+   * (Phase 9, Slice 3) — a new entry point alongside the existing Recent
+   * Projects flow, both of which converge on openProject(filePath).
+   *
+   * Lifecycle:
+   *   1. Calls window.api.project.openDialog().
+   *   2a. On a chosen path: delegates entirely to openProject(filePath) —
+   *       every subsequent state change (projectOpening, currentProjectDoc,
+   *       etc.) is owned by that action, not duplicated here.
+   *   2b. On cancellation: no state mutation at all — the user dismissing
+   *       the native picker is a normal action, not a failure (mirrors
+   *       saveAsProject()'s cancellation handling).
+   *   2c. On a picker-level error: sets projectOpenError.
+   *   2d. On IPC transport failure: captures the thrown error in
+   *       projectOpenError.
+   *
+   * Never throws into React. Components never need a try/catch around this call.
+   */
+  openExistingProject: () => Promise<void>
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 31)
+  // -------------------------------------------------------------------------
+
   /**
    * Loads the full recent-projects registry into recentProjects.
    *
@@ -2113,6 +2142,38 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ projectOpening: false })
     }
   },
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 9, Slice 3)
+  // -------------------------------------------------------------------------
+
+  openExistingProject: async () => {
+    if (!window.api?.project) {
+      set({ projectOpenError: 'Project API is not available.' })
+      return
+    }
+
+    try {
+      const result = await window.api.project.openDialog()
+
+      if (result.status === 'cancelled') return
+      // a cancelled native dialog is not an error (mirrors saveAsProject())
+
+      if (result.status === 'error') {
+        set({ projectOpenError: result.error })
+        return
+      }
+
+      await get().openProject(result.filePath)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to open the file picker.'
+      set({ projectOpenError: message })
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Project Persistence Actions (Phase 7, Slice 31)
+  // -------------------------------------------------------------------------
 
   loadRecentProjects: async () => {
     if (!window.api?.project) return

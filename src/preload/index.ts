@@ -28,6 +28,7 @@ import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
 import type {
   IProjectOpenRequest,
   IProjectOpenResult,
+  IProjectOpenDialogResult,
   IProjectSaveRequest,
   IProjectSaveResult,
   IProjectSaveAsRequest,
@@ -312,6 +313,7 @@ const workspaceApi = {
 //   project.getRecent()         — invoke project:recent      (Slice 31)
 //   project.autosave(request)   — invoke project:autosave    (Slice 32)
 //   project.onSaved(cb)         — subscribe to project:saved (Slice 32)
+//   project.openDialog()        — invoke project:openDialog  (Phase 9, Slice 3)
 // ---------------------------------------------------------------------------
 
 const projectApi = {
@@ -346,7 +348,10 @@ const projectApi = {
     return () => {
       ipcRenderer.removeListener(ProjectIpcChannels.saved, handler)
     }
-  }
+  },
+
+  openDialog: (): Promise<IProjectOpenDialogResult> =>
+    ipcRenderer.invoke(ProjectIpcChannels.openDialog) as Promise<IProjectOpenDialogResult>
 }
 
 // ---------------------------------------------------------------------------

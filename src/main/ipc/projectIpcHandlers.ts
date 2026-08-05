@@ -36,6 +36,7 @@
  *   project:recent   → RecentProjectsService.getAll() (Slice 31)
  *   project:autosave → ProjectService.autosave() (Slice 32)
  *   project:delete  → ProjectService.delete() (Slice 33)
+ *   project:openDialog → dialog.showOpenDialog() only, no ProjectService call (Phase 9, Slice 3)
  *
  * Push channels sent here (Main → Renderer):
  *   project:saved → sent after a successful project:autosave, via mainWindow
@@ -57,6 +58,7 @@ import type { IWorkspaceInfo } from '@shared/types/workspace'
 import type {
   IProjectOpenRequest,
   IProjectOpenResult,
+  IProjectOpenDialogResult,
   IProjectSaveRequest,
   IProjectSaveResult,
   IProjectSaveAsRequest,
@@ -248,6 +250,35 @@ function registerProjectIpcHandlers(mainWindow: BrowserWindow): void {
       return result
     }
   )
+
+  // -------------------------------------------------------------------------
+  // Invoke: project:openDialog
+  //
+  // Shows the native Open dialog for selecting a single .iotos project file.
+  // Returns only the chosen path — never reads the file, never calls
+  // ProjectService. The existing project:open handler (above) owns everything
+  // downstream of obtaining a path, matching Recent Projects' existing flow.
+  // -------------------------------------------------------------------------
+  ipcMain.handle(
+    ProjectIpcChannels.openDialog,
+    async (): Promise<IProjectOpenDialogResult> => {
+      try {
+        const dialogResult = await dialog.showOpenDialog(mainWindow, {
+          properties: ['openFile'],
+          filters: [{ name: 'IoTOS Project', extensions: ['iotos'] }]
+        })
+
+        if (dialogResult.canceled || dialogResult.filePaths.length === 0) {
+          return { status: 'cancelled' }
+        }
+
+        return { status: 'success', filePath: dialogResult.filePaths[0] }
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Failed to open the file picker.'
+        return { status: 'error', code: 'unknown', error: message }
+      }
+    }
+  )
 }
 
 /**
@@ -265,6 +296,7 @@ function removeProjectIpcHandlers(): void {
   ipcMain.removeHandler(ProjectIpcChannels.recent)
   ipcMain.removeHandler(ProjectIpcChannels.autosave)
   ipcMain.removeHandler(ProjectIpcChannels.delete)
+  ipcMain.removeHandler(ProjectIpcChannels.openDialog)
 }
 
 // ---------------------------------------------------------------------------

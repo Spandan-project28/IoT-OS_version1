@@ -65,6 +65,7 @@ import type {
 import type {
   IProjectOpenRequest,
   IProjectOpenResult,
+  IProjectOpenDialogResult,
   IProjectSaveRequest,
   IProjectSaveResult,
   IProjectSaveAsRequest,
@@ -422,6 +423,7 @@ export type WorkspaceGetInfoResult = IWorkspaceInfo
 //   open, recent   — Slice 31
 //   autosave, saved — Slice 32
 //   delete — Slice 33
+//   openDialog — Phase 9, Slice 3
 // No stub handlers exist for unregistered channels — calling one before its
 // slice lands rejects with Electron's standard "no handler registered" error.
 // ---------------------------------------------------------------------------
@@ -446,7 +448,13 @@ export const ProjectIpcChannels = Object.freeze({
   autosave: 'project:autosave' as const,
 
   /** Main → Renderer (push / one-way). Payload: IProjectSavedPayload. */
-  saved: 'project:saved' as const
+  saved: 'project:saved' as const,
+
+  /**
+   * Renderer → Main (invoke). No request payload.
+   * Response: IProjectOpenDialogResult.
+   */
+  openDialog: 'project:openDialog' as const
 } as const)
 
 // ---------------------------------------------------------------------------
@@ -489,6 +497,9 @@ export type ProjectRecentResult = IRecentProject[]
 
 /** Payload pushed on the project:saved channel. */
 export type ProjectSavedPayload = IProjectSavedPayload
+
+/** Response payload for the project:openDialog invoke channel. */
+export type ProjectOpenDialogResult = IProjectOpenDialogResult
 
 // ---------------------------------------------------------------------------
 // Settings channels (Phase 8, Slice 35)
