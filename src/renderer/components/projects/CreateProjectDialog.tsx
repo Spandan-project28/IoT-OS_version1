@@ -1,7 +1,8 @@
 /**
  * CreateProjectDialog
  *
- * The Create New Project dialog on the Projects page (Phase 9, Slice 5).
+ * The Create New Project dialog on the Projects page (Phase 9, Slice 4 —
+ * PHASES.md bundles the "+" menu and this dialog into one slice).
  *
  * Architectural rules:
  * - Owns only its own local form state (project name, selected board),

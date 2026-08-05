@@ -1,7 +1,9 @@
 /**
  * YourProjectsSection
  *
- * The "Your Projects" section on the Projects page (Phase 9, Slice 6).
+ * The "Your Projects" section on the Projects page (Phase 9 — added in
+ * response to a manual-testing gap found after Slice 4 shipped; not one of
+ * PHASES.md's five defined Phase 9 slices).
  *
  * Architectural rules:
  * - Presentation only — owns row layout, truncation, per-row "opening"
@@ -12,8 +14,9 @@
  *   delegates via callback prop" convention already set by TemplateCard.tsx
  *   and NewProjectMenu.tsx for this page's satellite components.
  * - A dedicated component rather than one shared with Home.tsx's Recent
- *   Projects list (see the Slice 6 implementation report for the reasoning
- *   recorded at implementation time).
+ *   Projects list: Home.tsx's row also owns delete and file-path display,
+ *   both intentionally excluded here, and extracting a shared component
+ *   would require modifying Home.tsx for no functional gain to that page.
  */
 
 import React from 'react'
