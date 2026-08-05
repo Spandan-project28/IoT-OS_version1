@@ -14,7 +14,8 @@ import type {
   IUploadRequest,
   ICompiledFirmware,
   ICompileResult,
-  IUploadResult
+  IUploadResult,
+  IUploadLogPayload
 } from '@shared/types/upload'
 import type {
   ISerialOpenRequest,
@@ -113,13 +114,17 @@ const hardwareApi = {
 //
 // Architectural rules:
 // - Thin bridge only — no business logic.
-// - All three methods are invoke/response (no push events in this slice).
+// - compile/upload/compileAndUpload are invoke/response.
+// - onLog subscribes to the upload:log push channel (Phase 10) and returns
+//   an unsubscribe function, exactly like hardware.onStateChanged().
 // - Types flow from @shared/types/upload — no duplication.
 //
 // Channels:
 //   upload.compile(request)              — invoke upload:compile
 //   upload.upload(firmware)              — invoke upload:upload
 //   upload.compileAndUpload(request)     — invoke upload:compileAndUpload
+//   upload.onLog(cb)                     — subscribe to upload:log push events
+//                                          returns () => void unsubscribe function
 // ---------------------------------------------------------------------------
 
 const uploadApi = {
@@ -144,7 +149,26 @@ const uploadApi = {
    * Primary entry point for the one-click upload workflow in V0.1.
    */
   compileAndUpload: (request: IUploadRequest): Promise<IUploadResult> =>
-    ipcRenderer.invoke(UploadIpcChannels.compileAndUpload, request) as Promise<IUploadResult>
+    ipcRenderer.invoke(UploadIpcChannels.compileAndUpload, request) as Promise<IUploadResult>,
+
+  /**
+   * Subscribes to upload:log push events from the Main process.
+   *
+   * Called for every command/stdout/stderr chunk produced by a compile or
+   * upload subprocess, in real time — never batched until process exit.
+   *
+   * @param callback - Called with IUploadLogPayload on each push.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onLog: (callback: (payload: IUploadLogPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: IUploadLogPayload): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(UploadIpcChannels.log, handler)
+    return () => {
+      ipcRenderer.removeListener(UploadIpcChannels.log, handler)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

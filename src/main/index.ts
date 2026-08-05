@@ -99,8 +99,9 @@ app.whenReady().then(async () => {
   // Step 3: Register IPC handlers (attach to the window so push events work).
   hardwareIpcHandlers.register(mainWindow)
 
-  // Upload handlers have no push events — no window reference needed.
-  uploadIpcHandlers.register()
+  // Upload handlers have a push event (upload:log, Phase 10) — window
+  // reference is required.
+  uploadIpcHandlers.register(mainWindow)
 
   // Serial handlers have push events (serial:data, serial:statusChanged) —
   // window reference is required.
@@ -131,7 +132,7 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const newWindow = createWindow()
       hardwareIpcHandlers.register(newWindow)
-      uploadIpcHandlers.register()
+      uploadIpcHandlers.register(newWindow)
       serialIpcHandlers.register(newWindow)
       aiIpcHandlers.register()
       projectIpcHandlers.register(newWindow)

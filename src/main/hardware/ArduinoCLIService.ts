@@ -50,6 +50,31 @@ let _state: IArduinoCLI = {
   installedCores: []
 }
 
+/**
+ * Common Windows installation locations for arduino-cli, checked in order
+ * when the executable cannot be found via the process's inherited PATH.
+ *
+ * This exists because arduino-cli's installer registers its directory in
+ * the Machine/User PATH environment variable at the OS level, but a
+ * long-running process (like this Electron app) only inherits PATH once,
+ * at spawn time — it never re-reads the registry. If arduino-cli was
+ * installed after this process started, PATH-based resolution fails even
+ * though the CLI is genuinely present and working.
+ */
+const COMMON_INSTALL_PATHS: readonly string[] = [
+  'C:\\Program Files\\Arduino CLI\\arduino-cli.exe',
+  'C:\\Program Files (x86)\\Arduino CLI\\arduino-cli.exe'
+]
+
+/**
+ * The executable path used for every arduino-cli invocation. Starts as the
+ * bare command name (resolved via PATH) and is upgraded to an absolute path
+ * the first time resolveExecutable() finds arduino-cli via the fallback
+ * search below. Cached across refresh() calls so a successful fallback
+ * resolution is not re-searched from scratch every time.
+ */
+let _resolvedExecutable = 'arduino-cli'
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
@@ -84,7 +109,7 @@ function isVersionSupported(
  */
 async function detectVersion(): Promise<string | null> {
   try {
-    const { stdout } = await execAsync('arduino-cli version --format json', {
+    const { stdout } = await execAsync(`"${_resolvedExecutable}" version --format json`, {
       timeout: 5000
     })
     // Expected JSON: {"VersionString":"1.2.3","Commit":"...","Status":"..."}
@@ -105,7 +130,7 @@ async function detectVersion(): Promise<string | null> {
  */
 async function detectInstalledCores(): Promise<string[]> {
   try {
-    const { stdout } = await execAsync('arduino-cli core list --format json', {
+    const { stdout } = await execAsync(`"${_resolvedExecutable}" core list --format json`, {
       timeout: 8000
     })
 
@@ -123,6 +148,45 @@ async function detectInstalledCores(): Promise<string[]> {
   }
 }
 
+/**
+ * Resolves which arduino-cli executable to use, in priority order:
+ *   1. A previously resolved executable, if it still works (cache reuse).
+ *   2. The bare "arduino-cli" command, relying on the process's inherited PATH.
+ *   3. Common Windows installation paths (COMMON_INSTALL_PATHS above).
+ *
+ * Returns 'arduino-cli' (the bare command) if nothing is found anywhere, so
+ * downstream error messages continue to read naturally ("arduino-cli not
+ * found ... in PATH").
+ */
+async function resolveExecutable(): Promise<string> {
+  if (_resolvedExecutable !== 'arduino-cli') {
+    try {
+      await execAsync(`"${_resolvedExecutable}" version`, { timeout: 5000 })
+      return _resolvedExecutable
+    } catch {
+      // Previously resolved path no longer works — re-resolve from scratch.
+    }
+  }
+
+  try {
+    await execAsync('arduino-cli version', { timeout: 5000 })
+    return 'arduino-cli'
+  } catch {
+    // Not found via PATH — fall through to common install paths.
+  }
+
+  for (const candidate of COMMON_INSTALL_PATHS) {
+    try {
+      await execAsync(`"${candidate}" version`, { timeout: 5000 })
+      return candidate
+    } catch {
+      continue
+    }
+  }
+
+  return 'arduino-cli'
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -131,14 +195,16 @@ async function detectInstalledCores(): Promise<string[]> {
  * Queries the arduino-cli executable and refreshes internal state.
  *
  * Steps performed:
- * 1. Detect CLI version via `arduino-cli version --format json`.
- * 2. Validate that the version meets the minimum requirement.
- * 3. If valid, query installed cores via `arduino-cli core list --format json`.
+ * 1. Resolve which executable to use (PATH, or a common install path fallback).
+ * 2. Detect CLI version via `<resolved> version --format json`.
+ * 3. Validate that the version meets the minimum requirement.
+ * 4. If valid, query installed cores via `<resolved> core list --format json`.
  *
  * After this call, getState() will reflect the latest discovered state.
  * This method never throws — all errors are captured in the returned state.
  */
 async function refresh(): Promise<IArduinoCLI> {
+  _resolvedExecutable = await resolveExecutable()
   const rawVersion = await detectVersion()
 
   if (!rawVersion) {
@@ -182,11 +248,26 @@ function getState(): IArduinoCLI {
   return { ..._state, installedCores: [..._state.installedCores] }
 }
 
+/**
+ * Returns the actual executable path/command that refresh() resolved and
+ * verified working (an absolute path from COMMON_INSTALL_PATHS, or the bare
+ * "arduino-cli" command if it resolves via the process's inherited PATH).
+ *
+ * This is the ONLY value any other module (e.g. UploadService) may pass to
+ * spawn/exec/execFile to invoke the CLI — never the literal string
+ * "arduino-cli", which is not guaranteed to be on PATH even when the CLI is
+ * installed and detected (see resolveExecutable()'s fallback search above).
+ */
+function getResolvedExecutablePath(): string {
+  return _resolvedExecutable
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
 export const ArduinoCLIService = Object.freeze({
   refresh,
-  getState
+  getState,
+  getResolvedExecutablePath
 })

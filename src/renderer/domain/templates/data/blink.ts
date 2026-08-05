@@ -39,19 +39,31 @@ export const blinkTemplate: ITemplateDefinition = Object.freeze({
   firmware: `// Blink LED
 // Blinks the onboard LED every second and prints the state to Serial Monitor.
 // Compatible with Arduino Uno, Arduino Nano, and ESP32 DevKit.
+//
+// LED_BUILTIN is defined by Arduino Uno's and Nano's board package (pin 13),
+// but some ESP32 board variants (e.g. the generic esp32:esp32:esp32 FQBN)
+// don't define it at all. LED_PIN resolves to LED_BUILTIN wherever the
+// board package defines it, and falls back to GPIO2 (the ESP32 DevKit's
+// conventional onboard LED pin) otherwise — resolved by the preprocessor
+// per-board at compile time, not guessed ahead of time.
+#ifdef LED_BUILTIN
+const int LED_PIN = LED_BUILTIN;
+#else
+const int LED_PIN = 2;
+#endif
 
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
   Serial.begin(9600);
   Serial.println("Blink LED started");
 }
 
 void loop() {
-  digitalWrite(LED_BUILTIN, HIGH);
+  digitalWrite(LED_PIN, HIGH);
   Serial.println("LED ON");
   delay(1000);
 
-  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED_PIN, LOW);
   Serial.println("LED OFF");
   delay(1000);
 }

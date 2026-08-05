@@ -15,10 +15,12 @@
  *   hardware:refresh    — Renderer → Main invoke, forces re-scan, returns IHardwareState.
  *   hardware:stateChanged — Main → Renderer push, sent on every HardwareManager state change.
  *
- * Upload channels (Phase 3, Slice 9):
+ * Upload channels (Phase 3, Slice 9; upload:log added Phase 10):
  *   upload:compile          — Renderer → Main invoke, returns ICompileResult.
  *   upload:upload           — Renderer → Main invoke, returns IUploadResult.
  *   upload:compileAndUpload — Renderer → Main invoke, returns IUploadResult.
+ *   upload:log              — Main → Renderer push, streams each command/stdout/stderr
+ *                              chunk live as compile/upload subprocesses produce it.
  *
  * Serial channels (Phase 4, Slice 15):
  *   serial:open          — Renderer → Main invoke, opens a port, returns ISerialResult.
@@ -53,7 +55,13 @@
 
 import type { IHardwareState } from './hardware'
 import type { IAIGenerateRequest, IAIResult } from './ai'
-import type { IUploadRequest, ICompiledFirmware, ICompileResult, IUploadResult } from './upload'
+import type {
+  IUploadRequest,
+  ICompiledFirmware,
+  ICompileResult,
+  IUploadResult,
+  IUploadLogPayload
+} from './upload'
 import type {
   ISerialOpenRequest,
   ISerialCloseRequest,
@@ -147,18 +155,22 @@ export type HardwareStateChangedPayload = IHardwareState
  * Intentionally separate from HardwareIpcChannels — the upload domain
  * is independent of hardware detection and must remain decoupled.
  *
- * All three channels are Renderer → Main invoke calls.
- * No push events are defined in this slice (progress streaming is deferred).
+ * compile/upload/compileAndUpload are Renderer → Main invoke calls.
+ * log is a Main → Renderer push channel (Phase 10) streaming Integrated
+ * Terminal output live — see UploadEventBus.ts and uploadIpcHandlers.ts.
  *
  * Usage (Main):
  *   ipcMain.handle(UploadIpcChannels.compileAndUpload, (_, req) => UploadService.compileAndUpload(req))
+ *   mainWindow.webContents.send(UploadIpcChannels.log, payload)
  *
  * Usage (Preload):
  *   ipcRenderer.invoke(UploadIpcChannels.compile, request)
+ *   ipcRenderer.on(UploadIpcChannels.log, handler)
  *
  * Usage (Renderer):
  *   window.api.upload.compile(request)
  *   window.api.upload.compileAndUpload(request)
+ *   window.api.upload.onLog(callback)
  */
 export const UploadIpcChannels = Object.freeze({
   /**
@@ -184,7 +196,15 @@ export const UploadIpcChannels = Object.freeze({
    * Request:  IUploadRequest
    * Response: IUploadResult
    */
-  compileAndUpload: 'upload:compileAndUpload' as const
+  compileAndUpload: 'upload:compileAndUpload' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent for every command/stdout/stderr chunk produced by a compile or
+   * upload subprocess, in real time — never batched until process exit.
+   * Renderer subscribes via window.api.upload.onLog().
+   */
+  log: 'upload:log' as const
 } as const)
 
 // ---------------------------------------------------------------------------
@@ -225,6 +245,11 @@ export type UploadCompileAndUploadRequest = IUploadRequest
  * Response payload for the upload:compileAndUpload invoke channel.
  */
 export type UploadCompileAndUploadResult = IUploadResult
+
+/**
+ * Payload pushed on the upload:log channel.
+ */
+export type UploadLogPayload = IUploadLogPayload
 
 // ---------------------------------------------------------------------------
 // Serial channels

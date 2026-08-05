@@ -42,6 +42,7 @@ import { TopBar } from '../../components/layout/TopBar'
 import { Panel } from '../../components/common/Panel'
 import { ScrollContainer } from '../../components/common/ScrollContainer'
 import { MonacoEditorPanel } from '../../components/editor/MonacoEditorPanel'
+import { IntegratedTerminal } from '../../components/terminal/IntegratedTerminal'
 import { DiffEditor } from '@monaco-editor/react'
 import { useAppStore } from '../../store/useAppStore'
 import {
@@ -679,6 +680,8 @@ export function Editor(): React.JSX.Element {
           </ScrollContainer>
         </Panel>
       </div>
+
+      <IntegratedTerminal />
     </div>
   )
 }

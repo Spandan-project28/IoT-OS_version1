@@ -12,6 +12,8 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     disposeHardware,
     initializeSerial,
     disposeSerial,
+    initializeUploadTerminal,
+    disposeUploadTerminal,
     loadRecentProjects,
     initializeProjectSync,
     disposeProjectSync,
@@ -21,6 +23,9 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
   useEffect(() => {
     initializeHardware()
     initializeSerial()
+    // Phase 10: subscribes to upload:log so the Integrated Terminal receives
+    // compile/upload output live, matching initializeSerial()'s lifecycle.
+    initializeUploadTerminal()
     // Phase 7, Slice 31: one-time load — recentProjects is intentionally
     // never refreshed again after this (see useAppStore.ts's doc comment).
     void loadRecentProjects()
@@ -34,6 +39,7 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     return () => {
       disposeHardware()
       disposeSerial()
+      disposeUploadTerminal()
       disposeProjectSync()
     }
   }, [
@@ -41,6 +47,8 @@ export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     disposeHardware,
     initializeSerial,
     disposeSerial,
+    initializeUploadTerminal,
+    disposeUploadTerminal,
     loadRecentProjects,
     initializeProjectSync,
     disposeProjectSync,

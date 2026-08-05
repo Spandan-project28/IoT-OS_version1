@@ -88,3 +88,38 @@ export type ICompileResult =
  */
 export type IUploadResult =
   { status: 'success' } | { status: 'error'; code: UploadErrorCode; error: string; raw?: string }
+
+// ---------------------------------------------------------------------------
+// Integrated Terminal streaming (Phase 10)
+// ---------------------------------------------------------------------------
+
+/**
+ * The category of a single Integrated Terminal log entry.
+ *
+ * - 'command' — the exact arduino-cli invocation about to run.
+ * - 'stdout'  — a chunk of the subprocess's standard output stream.
+ * - 'stderr'  — a chunk of the subprocess's standard error stream.
+ * - 'system'  — a synthetic status line constructed by the Renderer (e.g. the
+ *               final "Compile successful" / "Upload successful" message).
+ *               UploadService and UploadEventBus never emit this category —
+ *               it exists only so the Renderer can reuse IUploadLogPayload's
+ *               shape for its own locally-appended entries.
+ */
+export type UploadLogStream = 'command' | 'stdout' | 'stderr' | 'system'
+
+/**
+ * A single incremental log entry streamed to the Integrated Terminal.
+ *
+ * Emitted by UploadService via UploadEventBus as compile/upload subprocesses
+ * produce output — never buffered until process exit. See
+ * UploadService.ts's runProcess() and UploadEventBus.ts for the emission
+ * path, and uploadIpcHandlers.ts for the upload:log push channel that
+ * forwards these to the Renderer in real time.
+ */
+export interface IUploadLogPayload {
+  stream: UploadLogStream
+  /** Raw text for this entry. May contain embedded newlines. */
+  text: string
+  /** Milliseconds since epoch, stamped at the moment this entry was produced. */
+  timestamp: number
+}

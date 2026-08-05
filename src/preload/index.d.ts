@@ -4,7 +4,8 @@ import type {
   IUploadRequest,
   ICompiledFirmware,
   ICompileResult,
-  IUploadResult
+  IUploadResult,
+  IUploadLogPayload
 } from '@shared/types/upload'
 import type {
   ISerialOpenRequest,
@@ -97,6 +98,14 @@ export interface IUploadApi {
    * Primary entry point for the one-click upload workflow in V0.1.
    */
   compileAndUpload: (request: IUploadRequest) => Promise<IUploadResult>
+
+  /**
+   * Subscribes to upload:log push events from the Main process (Phase 10).
+   * Called for every command/stdout/stderr chunk produced by a compile or
+   * upload subprocess, in real time — never batched until process exit.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onLog: (callback: (payload: IUploadLogPayload) => void) => () => void
 }
 
 export interface ISerialApi {

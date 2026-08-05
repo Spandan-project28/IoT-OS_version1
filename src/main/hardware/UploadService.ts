@@ -13,6 +13,10 @@
  * - upload() owns temp directory cleanup (always runs in finally block).
  * - All CLI subprocesses use child_process.spawn (not exec) to avoid stdout buffer
  *   limits on large firmware binaries.
+ * - Every subprocess's command line, stdout, and stderr is streamed live to
+ *   UploadEventBus as it is produced (Phase 10, Integrated Terminal) — never
+ *   buffered until process exit. The full buffered text is still returned in
+ *   the final result, since parseCompileError()/parseUploadError() need it.
  *
  * Public API:
  * - compile(request)          → ICompileResult    (produces compiled artifact)
@@ -20,7 +24,9 @@
  * - compileAndUpload(request) → IUploadResult     (thin convenience wrapper)
  *
  * IPC integration: uploadIpcHandlers.ts (Phase 3, Slice 9) delegates all three
- * public methods to the Renderer via the upload:* invoke channels.
+ * public methods to the Renderer via the upload:* invoke channels, and
+ * forwards UploadEventBus's upload:log events via the upload:log push
+ * channel (Phase 10).
  */
 
 import { spawn } from 'child_process'
@@ -29,6 +35,8 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
 import { ArduinoCLIService } from './ArduinoCLIService'
+import { UploadEventBus } from './UploadEventBus'
+import { SerialService } from '../serial/SerialService'
 import type {
   IUploadRequest,
   ICompiledFirmware,
@@ -48,27 +56,65 @@ interface SpawnResult {
 }
 
 /**
+ * Emits a single Integrated Terminal log entry to UploadEventBus, stamped
+ * with the moment it was produced. The IPC layer forwards this to the
+ * Renderer in real time via the upload:log push channel — see
+ * uploadIpcHandlers.ts.
+ */
+function emitLog(stream: 'command' | 'stdout' | 'stderr', text: string): void {
+  UploadEventBus.emit('upload:log', { stream, text, timestamp: Date.now() })
+}
+
+/**
+ * Formats a resolved executable path and its arguments for display in the
+ * Integrated Terminal, e.g.:
+ *   "C:\Program Files\Arduino CLI\arduino-cli.exe" compile --fqbn ... <dir>
+ *
+ * The executable is always quoted (it commonly contains spaces on Windows).
+ * Arguments are quoted only when they themselves contain whitespace, so the
+ * common case (flags, FQBNs, port names) reads cleanly.
+ */
+function formatCommandForDisplay(executable: string, args: string[]): string {
+  const quotedArgs = args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg))
+  return [`"${executable}"`, ...quotedArgs].join(' ')
+}
+
+/**
  * Runs a CLI command as a child process, collecting stdout and stderr.
  *
  * Uses spawn (not exec) to avoid the default 200KB stdout buffer limit,
  * which can be exceeded by verbose compiler output on large sketches.
- * shell:true ensures PATH resolution matches the behaviour of exec() used
- * in ArduinoCLIService, and guarantees the command resolves on Windows.
+ * `command` must always be the resolved absolute executable path from
+ * ArduinoCLIService.getResolvedExecutablePath() — never the bare literal
+ * "arduino-cli", which is not guaranteed to be on this process's inherited
+ * PATH even when the CLI is installed and detected. No shell is used, so
+ * args never need shell-quoting (important since the resolved path itself
+ * commonly contains spaces, e.g. "C:\Program Files\Arduino CLI\arduino-cli.exe"),
+ * and libuv still performs a PATH search on Windows for a bare command name.
+ *
+ * Every chunk is streamed live to UploadEventBus via emitLog() as it
+ * arrives, in addition to being accumulated into the full buffered
+ * stdout/stderr strings returned on completion — parseCompileError() and
+ * parseUploadError() still need the complete text to pattern-match against.
  *
  * This function never rejects — process errors are converted to exit code 1.
  */
 function runProcess(command: string, args: string[]): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const proc = spawn(command, args, { shell: true })
+    const proc = spawn(command, args)
 
     let stdout = ''
     let stderr = ''
 
     proc.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf-8')
+      const text = chunk.toString('utf-8')
+      stdout += text
+      emitLog('stdout', text)
     })
     proc.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf-8')
+      const text = chunk.toString('utf-8')
+      stderr += text
+      emitLog('stderr', text)
     })
 
     proc.on('close', (code) => {
@@ -77,6 +123,7 @@ function runProcess(command: string, args: string[]): Promise<SpawnResult> {
 
     proc.on('error', (err) => {
       // Handles ENOENT (command not found) and similar OS-level errors
+      emitLog('stderr', err.message)
       resolve({ exitCode: 1, stdout: '', stderr: err.message })
     })
   })
@@ -280,8 +327,13 @@ async function compile(request: IUploadRequest): Promise<ICompileResult> {
   }
   const sketchDir = path.join(buildPath, SKETCH_FOLDER_NAME)
 
-  // Step 3: Execute arduino-cli compile
-  const result = await runProcess('arduino-cli', ['compile', '--fqbn', request.fqbn, sketchDir])
+  // Step 3: Execute arduino-cli compile, via the resolved executable path —
+  // never the bare "arduino-cli" literal, which is not guaranteed to be on
+  // this process's inherited PATH (see ArduinoCLIService.resolveExecutable()).
+  const executable = ArduinoCLIService.getResolvedExecutablePath()
+  const compileArgs = ['compile', '--fqbn', request.fqbn, sketchDir]
+  emitLog('command', formatCommandForDisplay(executable, compileArgs))
+  const result = await runProcess(executable, compileArgs)
 
   if (result.exitCode === 0) {
     // Ownership of buildPath transfers to the artifact — do NOT clean up here
@@ -324,14 +376,24 @@ async function upload(firmware: ICompiledFirmware): Promise<IUploadResult> {
       }
     }
 
-    const result = await runProcess('arduino-cli', [
-      'upload',
-      '-p',
-      firmware.port,
-      '--fqbn',
-      firmware.fqbn,
-      sketchDir
-    ])
+    // If the Device Monitor holds an open serial connection on this port,
+    // arduino-cli's uploader (esptool/avrdude) cannot open it — the OS only
+    // allows one owner of a serial handle at a time. Arduino IDE closes the
+    // Serial Monitor automatically before every upload for the same reason;
+    // mirror that here so a forgotten-open monitor doesn't masquerade as a
+    // board/cable problem.
+    if (SerialService.hasSession(firmware.port)) {
+      emitLog(
+        'stdout',
+        `Closing active Serial Monitor session on ${firmware.port} before upload...\n`
+      )
+      await SerialService.close(firmware.port)
+    }
+
+    const executable = ArduinoCLIService.getResolvedExecutablePath()
+    const uploadArgs = ['upload', '-p', firmware.port, '--fqbn', firmware.fqbn, sketchDir]
+    emitLog('command', formatCommandForDisplay(executable, uploadArgs))
+    const result = await runProcess(executable, uploadArgs)
 
     if (result.exitCode === 0) {
       return { status: 'success' }

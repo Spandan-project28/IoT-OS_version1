@@ -44,6 +44,7 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
     uploadLoading,
     uploadError,
     lastUploadResult,
+    compileFirmware,
     compileAndUploadFirmware,
     projectDirty,
     currentProjectDoc,
@@ -113,6 +114,31 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
     if (!canUpload || !firmwareSource || !connectedBoard || !connectedBoard.fqbn) return
 
     void compileAndUploadFirmware({
+      port: connectedBoard.port,
+      fqbn: connectedBoard.fqbn,
+      source: firmwareSource
+    })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Run eligibility guard (Phase 10 — Integrated Terminal)
+  //
+  // Run compiles only (no upload) via compileFirmware(). It shares the exact
+  // same guards as Upload — the current UI has no separate FQBN/board picker,
+  // so a connected, identified board is the only way to obtain an FQBN to
+  // compile against.
+  // ---------------------------------------------------------------------------
+  const canRun =
+    !!firmwareSource &&
+    !!connectedBoard &&
+    !!connectedBoard.fqbn &&
+    hardware.cli.isInstalled &&
+    !uploadLoading
+
+  function handleRun(): void {
+    if (!canRun || !firmwareSource || !connectedBoard || !connectedBoard.fqbn) return
+
+    void compileFirmware({
       port: connectedBoard.port,
       fqbn: connectedBoard.fqbn,
       source: firmwareSource
@@ -255,15 +281,22 @@ export function TopBar({ children, firmwareSource }: TopBarProps): React.JSX.Ele
               {uploadLoading ? 'Uploading...' : 'Upload'}
             </Button>
 
-            {/* Run — placeholder, not yet implemented */}
+            {/* Run — compiles only via compileFirmware(), streams live to the Integrated Terminal */}
             <Button
-              variant="ghost"
+              id="topbar-run-btn"
+              variant={canRun ? 'primary' : 'ghost'}
               size="sm"
-              className="!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300"
+              className={
+                canRun
+                  ? '!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap transition-all duration-300'
+                  : '!h-[32px] !py-0 !px-12 shrink-0 whitespace-nowrap text-disabled hover:text-white hover:!bg-transparent hover:drop-shadow-[var(--shadow-glow)] transition-all duration-300'
+              }
               leftIcon={<Play className="w-4 h-4" />}
-              disabled
+              isLoading={uploadLoading}
+              disabled={!canRun}
+              onClick={handleRun}
             >
-              Run
+              {uploadLoading ? 'Running...' : 'Run'}
             </Button>
           </div>
 

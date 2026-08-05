@@ -34,6 +34,17 @@
  *   compileFirmware(request)            → compile only, stores ICompileResult
  *   uploadFirmware(firmware)            → upload compiled artifact, stores IUploadResult
  *   compileAndUploadFirmware(request)   → compile + upload in one call, stores IUploadResult
+ *   All three clear + expand the Integrated Terminal at the start of the
+ *   call and append a synthetic 'system' log entry reporting the outcome
+ *   (Phase 10) — see the Terminal state lifecycle below for the streaming
+ *   side of this.
+ *
+ * Terminal state lifecycle (Phase 10 — Integrated Terminal):
+ *   initializeUploadTerminal() → subscribe to window.api.upload.onLog() push events
+ *   disposeUploadTerminal()    → unsubscribe the push event handle
+ *   clearTerminal()            → clears terminalLogs
+ *   setTerminalExpanded(bool)  → collapses/expands the dock
+ *   toggleTerminalAutoScroll() → toggles the auto-scroll preference
  *
  * Serial state lifecycle:
  *   initializeSerial()      → subscribe to serial:data + serial:statusChanged push events
@@ -78,7 +89,8 @@ import type {
   IUploadRequest,
   ICompiledFirmware,
   ICompileResult,
-  IUploadResult
+  IUploadResult,
+  IUploadLogPayload
 } from '@shared/types/upload'
 import type {
   ISerialOpenRequest,
@@ -422,6 +434,32 @@ export interface AppState {
    * watching the board run without requiring the user to re-select the port.
    */
   lastUploadedPort: string | null
+
+  // -------------------------------------------------------------------------
+  // Integrated Terminal State (Phase 10)
+  //
+  // Backs the bottom-docked terminal shown by the Run/Upload workflow.
+  // Populated by initializeUploadTerminal() via window.api.upload.onLog()
+  // push events, plus synthetic 'system' entries appended locally by the
+  // compile/upload actions to report final outcome.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Ordered log entries shown in the Integrated Terminal.
+   * Cleared at the start of every compileFirmware/uploadFirmware/
+   * compileAndUploadFirmware call, or manually via clearTerminal().
+   */
+  terminalLogs: IUploadLogPayload[]
+
+  /**
+   * True when the terminal dock is expanded. Set true automatically at the
+   * start of every compile/upload action; never auto-collapsed — the user
+   * must explicitly collapse it, including after a failure.
+   */
+  terminalExpanded: boolean
+
+  /** True when the terminal should auto-scroll to the newest entry. */
+  terminalAutoScroll: boolean
 
   // -------------------------------------------------------------------------
   // Serial State (Phase 4, Slice 16)
@@ -969,6 +1007,39 @@ export interface AppState {
   compileAndUploadFirmware: (request: IUploadRequest) => Promise<void>
 
   // -------------------------------------------------------------------------
+  // Integrated Terminal Actions (Phase 10)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Subscribes to window.api.upload.onLog() push events, appending each
+   * entry to terminalLogs.
+   *
+   * The unsubscribe handle is stored in a module-level private variable,
+   * not in the store — it is a runtime resource, not application state.
+   *
+   * Safe to call multiple times — subsequent calls are no-ops (mirrors
+   * initializeSerial()'s guard pattern).
+   */
+  initializeUploadTerminal: () => void
+
+  /**
+   * Removes the upload:log push subscription.
+   * Call this in the application root cleanup (e.g. on unmount or quit).
+   * terminalLogs itself is NOT reset so the terminal does not flicker if
+   * the component briefly unmounts and remounts.
+   */
+  disposeUploadTerminal: () => void
+
+  /** Clears all Integrated Terminal log entries. */
+  clearTerminal: () => void
+
+  /** Expands or collapses the Integrated Terminal dock. */
+  setTerminalExpanded: (expanded: boolean) => void
+
+  /** Toggles the Integrated Terminal's auto-scroll preference. */
+  toggleTerminalAutoScroll: () => void
+
+  // -------------------------------------------------------------------------
   // Serial Actions (Phase 4, Slice 16)
   // -------------------------------------------------------------------------
 
@@ -1094,6 +1165,28 @@ export interface AppState {
 // ---------------------------------------------------------------------------
 
 let _hardwareUnsubscribe: (() => void) | null = null
+
+/**
+ * Unsubscribe handle for window.api.upload.onLog().
+ * Null until initializeUploadTerminal() has been called.
+ */
+let _uploadLogUnsubscribe: (() => void) | null = null
+
+/**
+ * Appends a synthetic 'system' entry to terminalLogs — used by the
+ * compile/upload actions to report final outcome (e.g. "✓ Compile
+ * successful"). Never emitted by UploadService/UploadEventBus; this is the
+ * one place the Renderer constructs an IUploadLogPayload locally rather
+ * than receiving it via window.api.upload.onLog().
+ */
+function appendTerminalSystemLog(
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
+  text: string
+): void {
+  set((state) => ({
+    terminalLogs: [...state.terminalLogs, { stream: 'system', text, timestamp: Date.now() }]
+  }))
+}
 
 /**
  * Unsubscribe handle for window.api.serial.onData().
@@ -1305,6 +1398,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastUploadedPort: null,
 
   // -------------------------------------------------------------------------
+  // Integrated Terminal State initial values (Phase 10)
+  // -------------------------------------------------------------------------
+
+  terminalLogs: [],
+  terminalExpanded: false,
+  terminalAutoScroll: true,
+
+  // -------------------------------------------------------------------------
   // Serial State initial values (Phase 4, Slice 16)
   // -------------------------------------------------------------------------
 
@@ -1397,7 +1498,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   compileFirmware: async (request: IUploadRequest) => {
     if (!window.api?.upload) return
 
-    set({ uploadLoading: true, uploadError: null })
+    // Preserve logs until manually cleared or a new operation starts (Phase
+    // 10): a fresh Run clears the previous run's output and auto-expands
+    // the terminal so streamed compile output is visible immediately.
+    set({ uploadLoading: true, uploadError: null, terminalLogs: [], terminalExpanded: true })
 
     try {
       const result = await window.api.upload.compile(request)
@@ -1405,12 +1509,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (result.status === 'error') {
         set({ uploadError: result.error })
+        appendTerminalSystemLog(set, `✗ Compile failed: ${result.error}`)
+      } else {
+        appendTerminalSystemLog(set, '✓ Compile successful')
       }
     } catch (err: unknown) {
       // IPC transport errors — UploadService itself never throws,
       // but the IPC layer can fail if the Main process is unavailable.
       const message = err instanceof Error ? err.message : 'Compilation failed unexpectedly.'
       set({ uploadError: message })
+      appendTerminalSystemLog(set, `✗ Compile failed: ${message}`)
     } finally {
       set({ uploadLoading: false })
     }
@@ -1419,7 +1527,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   uploadFirmware: async (firmware: ICompiledFirmware) => {
     if (!window.api?.upload) return
 
-    set({ uploadLoading: true, uploadError: null })
+    set({ uploadLoading: true, uploadError: null, terminalLogs: [], terminalExpanded: true })
 
     try {
       const result = await window.api.upload.upload(firmware)
@@ -1427,10 +1535,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (result.status === 'error') {
         set({ uploadError: result.error })
+        appendTerminalSystemLog(set, `✗ Upload failed: ${result.error}`)
+      } else {
+        appendTerminalSystemLog(set, '✓ Upload successful\nBoard restarted.')
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed unexpectedly.'
       set({ uploadError: message })
+      appendTerminalSystemLog(set, `✗ Upload failed: ${message}`)
     } finally {
       set({ uploadLoading: false })
     }
@@ -1439,7 +1551,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   compileAndUploadFirmware: async (request: IUploadRequest) => {
     if (!window.api?.upload) return
 
-    set({ uploadLoading: true, uploadError: null })
+    set({ uploadLoading: true, uploadError: null, terminalLogs: [], terminalExpanded: true })
 
     try {
       const result = await window.api.upload.compileAndUpload(request)
@@ -1447,16 +1559,49 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (result.status === 'success') {
         set({ lastUploadedPort: request.port })
+        appendTerminalSystemLog(set, '✓ Upload successful\nBoard restarted.')
       } else {
         set({ uploadError: result.error })
+        appendTerminalSystemLog(set, `✗ Upload failed: ${result.error}`)
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Compile and upload failed unexpectedly.'
       set({ uploadError: message })
+      appendTerminalSystemLog(set, `✗ Upload failed: ${message}`)
     } finally {
       set({ uploadLoading: false })
     }
   },
+
+  // -------------------------------------------------------------------------
+  // Integrated Terminal Actions (Phase 10)
+  // -------------------------------------------------------------------------
+
+  initializeUploadTerminal: () => {
+    // Guard: prevent duplicate subscriptions
+    if (_uploadLogUnsubscribe !== null) return
+
+    // Guard: preload bridge must be available
+    if (!window.api?.upload) return
+
+    _uploadLogUnsubscribe = window.api.upload.onLog((payload: IUploadLogPayload) => {
+      set((state) => ({ terminalLogs: [...state.terminalLogs, payload] }))
+    })
+  },
+
+  disposeUploadTerminal: () => {
+    if (_uploadLogUnsubscribe) {
+      _uploadLogUnsubscribe()
+      _uploadLogUnsubscribe = null
+    }
+  },
+
+  clearTerminal: () => set({ terminalLogs: [] }),
+
+  setTerminalExpanded: (expanded: boolean) => set({ terminalExpanded: expanded }),
+
+  toggleTerminalAutoScroll: () =>
+    set((state) => ({ terminalAutoScroll: !state.terminalAutoScroll })),
 
   // -------------------------------------------------------------------------
   // Serial Actions (Phase 4, Slice 16)
