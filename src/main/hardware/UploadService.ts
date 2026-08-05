@@ -271,7 +271,13 @@ async function compile(request: IUploadRequest): Promise<ICompileResult> {
   }
 
   // Step 2: Create temp build directory and write source
-  const buildPath = await createTempBuild(request.source)
+  let buildPath: string
+  try {
+    buildPath = await createTempBuild(request.source)
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to create the build directory.'
+    return { status: 'error', code: 'unknown', error: message }
+  }
   const sketchDir = path.join(buildPath, SKETCH_FOLDER_NAME)
 
   // Step 3: Execute arduino-cli compile

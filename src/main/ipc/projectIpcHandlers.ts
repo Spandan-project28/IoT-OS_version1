@@ -148,7 +148,13 @@ function registerProjectIpcHandlers(mainWindow: BrowserWindow): void {
         return { status: 'cancelled' }
       }
 
-      fs.mkdirSync(path.dirname(dialogResult.filePath), { recursive: true })
+      try {
+        fs.mkdirSync(path.dirname(dialogResult.filePath), { recursive: true })
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : 'Failed to create the destination folder.'
+        return { status: 'error', code: 'unknown', error: message }
+      }
 
       const result = await ProjectService.save(request.document, dialogResult.filePath)
 
