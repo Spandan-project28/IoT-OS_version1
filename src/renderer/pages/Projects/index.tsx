@@ -20,6 +20,7 @@ import { TopBar } from '../../components/layout/TopBar'
 import { TemplateCard } from '../../components/templates/TemplateCard'
 import { NewProjectMenu } from '../../components/projects/NewProjectMenu'
 import { CreateProjectDialog } from '../../components/projects/CreateProjectDialog'
+import { YourProjectsSection } from '../../components/projects/YourProjectsSection'
 import { templateRegistry } from '../../domain/templates/registry'
 import { useAppStore } from '../../store/useAppStore'
 import { useNavigate } from 'react-router-dom'
@@ -32,11 +33,14 @@ export function Projects(): React.JSX.Element {
     selectTemplate,
     createManualProject,
     openExistingProject,
+    openProject,
+    recentProjects,
     projectOpening,
     projectOpenError
   } = useAppStore()
   const navigate = useNavigate()
   const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false)
+  const [openingFilePath, setOpeningFilePath] = React.useState<string | null>(null)
 
   function handleSelectTemplate(template: ITemplateDefinition): void {
     selectTemplate(template)
@@ -61,6 +65,18 @@ export function Projects(): React.JSX.Element {
     await openExistingProject()
     if (useAppStore.getState().projectOpenError === null) {
       void navigate('/editor')
+    }
+  }
+
+  async function handleOpenSavedProject(filePath: string): Promise<void> {
+    setOpeningFilePath(filePath)
+    try {
+      await openProject(filePath)
+      if (useAppStore.getState().projectOpenError === null) {
+        void navigate('/editor')
+      }
+    } finally {
+      setOpeningFilePath(null)
     }
   }
 
@@ -95,6 +111,16 @@ export function Projects(): React.JSX.Element {
               {projectOpenError}
             </div>
           )}
+
+          {/* ---------------------------------------------------------------- */}
+          {/* Your Projects                                                     */}
+          {/* ---------------------------------------------------------------- */}
+          <YourProjectsSection
+            projects={recentProjects}
+            openingFilePath={openingFilePath}
+            isOpening={projectOpening}
+            onSelectProject={(filePath) => void handleOpenSavedProject(filePath)}
+          />
 
           {/* ---------------------------------------------------------------- */}
           {/* Template Gallery grid                                             */}
