@@ -52,8 +52,11 @@ const BOARD_REGISTRY: readonly IBoardDefinition[] = Object.freeze([
     chipFamily: 'AVR ATmega328P',
     protocol: 'ATmega16U2 (USB-CDC)',
     fqbn: 'arduino:avr:uno',
-    vids: ['0x2341'],
-    pids: ['0x0043', '0x0001', '0x0243'],
+    identifiers: [
+      { vid: '0x2341', pid: '0x0043' },
+      { vid: '0x2341', pid: '0x0001' },
+      { vid: '0x2341', pid: '0x0243' }
+    ],
     capabilities: Object.freeze({
       arduinoCli: true,
       serialMonitor: true,
@@ -73,8 +76,10 @@ const BOARD_REGISTRY: readonly IBoardDefinition[] = Object.freeze([
     // Nano uses FTDI on official boards and CH340G on common clones
     protocol: 'FTDI FT232 / CH340G',
     fqbn: 'arduino:avr:nano',
-    vids: ['0x2341', '0x0403', '0x1a86'],
-    pids: ['0x0043', '0x6001', '0x7523'],
+    identifiers: [
+      { vid: '0x0403', pid: '0x6001' },
+      { vid: '0x1a86', pid: '0x7523' }
+    ],
     capabilities: Object.freeze({
       arduinoCli: true,
       serialMonitor: true,
@@ -94,8 +99,10 @@ const BOARD_REGISTRY: readonly IBoardDefinition[] = Object.freeze([
     // Official DevKit uses CP210x; most clones use CH340
     protocol: 'Silicon Labs CP210x / CH340',
     fqbn: 'esp32:esp32:esp32',
-    vids: ['0x10c4', '0x1a86'],
-    pids: ['0xea60', '0x7523'],
+    identifiers: [
+      { vid: '0x10c4', pid: '0xea60' },
+      { vid: '0x1a86', pid: '0x7523' }
+    ],
     capabilities: Object.freeze({
       arduinoCli: true,
       serialMonitor: true,
@@ -144,14 +151,18 @@ function getBoardById(id: string): IBoardDefinition | undefined {
 }
 
 /**
- * Returns ALL board definitions whose VID and PID lists contain the
- * given values. An empty array means no supported board was found.
+ * Returns ALL board definitions that declare an explicit (VID, PID) pair
+ * matching the given values. An empty array means no supported board was found.
  *
  * This is the canonical VID/PID lookup method. Because multiple boards
  * can share the same VID/PID combination (e.g. CH340 clones of both
  * Arduino Nano and ESP32 DevKit both report VID 0x1A86 / PID 0x7523),
  * this method intentionally returns every candidate rather than
  * picking one arbitrarily.
+ *
+ * VID and PID are matched only as a bound pair from a board's `identifiers`
+ * list — never as independent sets — so a board is never matched via a
+ * VID/PID combination it did not explicitly declare.
  *
  * BoardIdentificationService is responsible for resolving ambiguity
  * using secondary heuristics (manufacturer string, product name, etc.).
@@ -169,10 +180,10 @@ function findBoardsByVidPid(
   const normVid = normaliseHex(vendorId)
   const normPid = normaliseHex(productId)
 
-  return BOARD_REGISTRY.filter(
-    (board) =>
-      board.vids.map(normaliseHex).includes(normVid) &&
-      board.pids.map(normaliseHex).includes(normPid)
+  return BOARD_REGISTRY.filter((board) =>
+    board.identifiers.some(
+      (pair) => normaliseHex(pair.vid) === normVid && normaliseHex(pair.pid) === normPid
+    )
   )
 }
 

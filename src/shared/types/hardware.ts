@@ -38,10 +38,12 @@ export interface IBoardDefinition {
   protocol: string
   /** Arduino CLI Fully Qualified Board Name — required for compile + upload */
   fqbn?: string
-  /** List of USB Vendor IDs this board is known to expose (lowercase hex strings) */
-  vids: string[]
-  /** List of USB Product IDs this board is known to expose (lowercase hex strings) */
-  pids: string[]
+  /**
+   * Explicit (VID, PID) pairs this board is known to expose (lowercase hex
+   * strings). Each entry represents one real hardware/bridge-chip variant —
+   * VID and PID are never matched as independent sets.
+   */
+  identifiers: { vid: string; pid: string }[]
   /** Feature flags consumed by future services */
   capabilities: IBoardCapabilities
 }
