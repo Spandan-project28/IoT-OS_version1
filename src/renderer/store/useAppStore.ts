@@ -804,10 +804,17 @@ export interface AppState {
   /**
    * Loads the full recent-projects registry into recentProjects.
    *
-   * Called exactly once, from AppProviders.tsx's mount effect. Nothing else
-   * calls this — recentProjects is not refreshed after save, saveAs, open,
-   * or a stale-entry removal within the same session (accepted limitation,
-   * Slice 31).
+   * Called from AppProviders.tsx's mount effect, and again after every
+   * successful saveProject()/saveAsProject() so a newly saved project
+   * becomes visible in Recent Projects without requiring an app restart
+   * (bugfix, Phase 9 — recentProjects previously went stale for the
+   * lifetime of the session after Slice 31). Not called after open or
+   * autosave: an opened project's recents entry is unchanged by opening
+   * it, and an autosaved project's entry was already made visible by the
+   * manual save that necessarily preceded it (autosaveProject() only runs
+   * once currentProjectPath is already set). updateTitle() and
+   * deleteProject() patch recentProjects directly instead of calling this,
+   * since both already know the exact change to make.
    *
    * Never throws into React — a transport failure silently leaves
    * recentProjects at its previous value.
@@ -2043,6 +2050,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastSavedAt: result.savedAt,
           projectError: null
         })
+
+        // Bugfix (Phase 9): a successful save may have created or updated
+        // this project's Recent Projects entry (RecentProjectsService.push()
+        // on the Main side) — refresh so it's visible without an app
+        // restart. See loadRecentProjects()'s doc comment.
+        await get().loadRecentProjects()
       } else {
         set({ projectError: result.error })
       }
@@ -2086,6 +2099,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastSavedAt: result.savedAt,
           projectError: null
         })
+
+        // Bugfix (Phase 9): a successful Save As creates this project's
+        // Recent Projects entry (RecentProjectsService.push() on the Main
+        // side) — refresh so it's visible without an app restart. See
+        // loadRecentProjects()'s doc comment.
+        await get().loadRecentProjects()
       } else if (result.status === 'error') {
         set({ projectError: result.error })
       }
