@@ -15,7 +15,7 @@ import type {
   ISerialStatusPayload,
   ISerialResult
 } from '@shared/types/serial'
-import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
+import type { IAIGenerateRequest, IAIResult, IAILogPayload } from '@shared/types/ai'
 import type {
   IProjectOpenRequest,
   IProjectOpenResult,
@@ -153,19 +153,27 @@ export interface IAiApi {
    * ResponseParser → ResponseValidator → IProjectDocument.
    *
    * On success: IAIResult { status: 'success', project: IProjectDocument }.
-   *   The project is a fully constructed, immutable IProjectDocument. The
-   *   Zustand store holds it as a pendingAiCandidate awaiting explicit
-   *   Accept/Discard (Phase 8, Slice 36) — it is never written directly to
-   *   currentProjectDoc by this call.
+   *   The Zustand store applies the project directly to currentProjectDoc
+   *   and writes it into Monaco (Phase 11) — no separate review/accept step.
    *
    * On error: IAIResult { status: 'error', code: AIErrorCode, error: string }.
-   *   The code identifies the error category for UI branching without string parsing.
-   *   The error message is user-friendly and safe to display directly.
+   *   The code identifies the error category; the full technical detail
+   *   (URL, HTTP status, provider body) is streamed live via onLog() instead
+   *   of being carried on this result — see ai:log.
    *
    * Never rejects — all outcomes are returned as typed IAIResult values.
    * The Renderer does not need a try/catch around this call.
    */
   generate: (request: IAIGenerateRequest) => Promise<IAIResult>
+
+  /**
+   * Subscribes to ai:log push events from the Main process (Phase 11).
+   * Called for every step of the generation pipeline — provider/model/prompt,
+   * request/response milestones, parsing/validation progress, and complete
+   * provider errors — in real time, never batched until ai:generate resolves.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onLog: (callback: (payload: IAILogPayload) => void) => () => void
 }
 
 export interface IWorkspaceApi {

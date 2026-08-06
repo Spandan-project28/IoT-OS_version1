@@ -47,8 +47,16 @@ import type { IAIProviderConfig } from '@shared/types/ai'
  * Internal to src/main/ai/ — never crosses the IPC boundary.
  */
 export type IAIClientResult =
-  | { readonly status: 'success'; readonly rawText: string }
-  | { readonly status: 'error'; readonly code: AIClientErrorCode; readonly message: string }
+  | { readonly status: 'success'; readonly rawText: string; readonly httpStatus?: number }
+  | {
+      readonly status: 'error'
+      readonly code: AIClientErrorCode
+      readonly message: string
+      /** HTTP status code, present only when a response was actually received. */
+      readonly httpStatus?: number
+      /** Raw response body text, present only when a response was actually received. */
+      readonly body?: string
+    }
 
 /**
  * Error codes for AIClient.send() failures.
@@ -126,14 +134,25 @@ async function send(
     if (!response.ok) {
       const code = httpStatusToErrorCode(response.status)
       const statusText = response.statusText || String(response.status)
+      let bodyText = ''
+      try {
+        bodyText = await response.text()
+      } catch {
+        // Body already consumed or unreadable — proceed without it.
+      }
       return {
         status: 'error',
         code,
-        message: `Provider returned HTTP ${response.status}: ${statusText}`
+        message: `Provider returned HTTP ${response.status}: ${statusText}`,
+        httpStatus: response.status,
+        body: bodyText
       }
     }
 
-    const json = (await response.json()) as { choices?: { message?: { content?: string } }[] }
+    const responseText = await response.text()
+    const json = responseText
+      ? (JSON.parse(responseText) as { choices?: { message?: { content?: string } }[] })
+      : {}
     const rawText = json?.choices?.[0]?.message?.content ?? ''
 
     if (!rawText) {
@@ -141,11 +160,13 @@ async function send(
         status: 'error',
         code: 'provider_error',
         message:
-          'Provider returned an empty response. The model may not have generated any content.'
+          'Provider returned an empty response. The model may not have generated any content.',
+        httpStatus: response.status,
+        body: responseText
       }
     }
 
-    return { status: 'success', rawText }
+    return { status: 'success', rawText, httpStatus: response.status }
   } catch (err: unknown) {
     // AbortController.abort() causes fetch to throw a DOMException with name 'AbortError'
     if (isAbortError(err)) {

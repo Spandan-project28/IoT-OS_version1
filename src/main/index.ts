@@ -107,8 +107,8 @@ app.whenReady().then(async () => {
   // window reference is required.
   serialIpcHandlers.register(mainWindow)
 
-  // AI handlers are invoke/response only — no push events, no window reference needed.
-  aiIpcHandlers.register()
+  // AI handlers have a push event (ai:log, Phase 11) — window reference is required.
+  aiIpcHandlers.register(mainWindow)
 
   // Project/workspace handlers — only workspace:info is live in Slice 28.
   // window reference is accepted now for the project:saved push channel
@@ -134,7 +134,7 @@ app.whenReady().then(async () => {
       hardwareIpcHandlers.register(newWindow)
       uploadIpcHandlers.register(newWindow)
       serialIpcHandlers.register(newWindow)
-      aiIpcHandlers.register()
+      aiIpcHandlers.register(newWindow)
       projectIpcHandlers.register(newWindow)
       settingsIpcHandlers.register()
     }

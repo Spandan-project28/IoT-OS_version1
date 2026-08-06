@@ -343,3 +343,46 @@ export type IAIResult =
       /** User-friendly error message. Never contains implementation details. */
       readonly error: string
     }
+
+// ---------------------------------------------------------------------------
+// Integrated Terminal streaming (Phase 11)
+//
+// Mirrors IUploadLogPayload's shape exactly (see upload.ts) but is kept as
+// its own independent type per this codebase's convention of parallel,
+// domain-scoped types (see AIErrorCode vs UploadErrorCode) rather than a
+// cross-domain import.
+// ---------------------------------------------------------------------------
+
+/**
+ * The category of a single Integrated Terminal log entry emitted by the AI
+ * generation pipeline.
+ *
+ * - 'command' — unused by AIService (no shell invocation exists in this
+ *               domain); reserved for shape parity with IUploadLogPayload.
+ * - 'stdout'  — a step in the generation pipeline (provider, model, prompt,
+ *               request/response milestones, parsing/validation progress).
+ * - 'stderr'  — a complete provider/parsing/validation error, verbatim.
+ * - 'system'  — a synthetic status line constructed by the Renderer (the
+ *               final "Firmware generated successfully" / "Generation
+ *               failed" message). AIService and AiEventBus never emit this
+ *               category — see IUploadLogPayload's identical convention.
+ */
+export type AILogStream = 'command' | 'stdout' | 'stderr' | 'system'
+
+/**
+ * A single incremental log entry streamed to the Integrated Terminal.
+ *
+ * Emitted by AIService via AiEventBus at every step of the generation
+ * pipeline — provider resolution, the outgoing request, the response, JSON
+ * parsing, schema validation, and completion — never buffered until the
+ * IPC call resolves. See AIService.ts's emitLog() and AiEventBus.ts for the
+ * emission path, and aiIpcHandlers.ts for the ai:log push channel that
+ * forwards these to the Renderer in real time.
+ */
+export interface IAILogPayload {
+  stream: AILogStream
+  /** Raw text for this entry. May contain embedded newlines. */
+  text: string
+  /** Milliseconds since epoch, stamped at the moment this entry was produced. */
+  timestamp: number
+}

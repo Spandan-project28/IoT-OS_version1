@@ -54,7 +54,7 @@
  */
 
 import type { IHardwareState } from './hardware'
-import type { IAIGenerateRequest, IAIResult } from './ai'
+import type { IAIGenerateRequest, IAIResult, IAILogPayload } from './ai'
 import type {
   IUploadRequest,
   ICompiledFirmware,
@@ -387,7 +387,16 @@ export const AiIpcChannels = Object.freeze({
    * Request:  IAIGenerateRequest
    * Response: IAIResult
    */
-  generate: 'ai:generate' as const
+  generate: 'ai:generate' as const,
+
+  /**
+   * Main → Renderer (push / one-way).
+   * Sent for every step of the generation pipeline — provider/model/prompt,
+   * request/response milestones, parsing/validation progress, and complete
+   * provider errors — in real time, never batched until ai:generate resolves.
+   * Renderer subscribes via window.api.ai.onLog().
+   */
+  log: 'ai:log' as const
 } as const)
 
 // ---------------------------------------------------------------------------
@@ -403,6 +412,9 @@ export type AiGenerateRequest = IAIGenerateRequest
 
 /** Response payload for the ai:generate invoke channel. */
 export type AiGenerateResult = IAIResult
+
+/** Payload pushed on the ai:log channel. */
+export type AiLogPayload = IAILogPayload
 
 // ---------------------------------------------------------------------------
 // Workspace channels (Phase 7, Slice 28)

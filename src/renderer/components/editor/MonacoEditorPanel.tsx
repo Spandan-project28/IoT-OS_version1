@@ -74,24 +74,59 @@ export interface MonacoEditorPanelProps {
   onChange: (value: string) => void
 }
 
-export function MonacoEditorPanel({
-  value,
-  documentId,
-  onChange
-}: MonacoEditorPanelProps): React.JSX.Element {
-  return (
-    <Editor
-      key={documentId}
-      height="100%"
-      defaultLanguage="cpp"
-      defaultValue={value}
-      theme="vs-dark"
-      onChange={(newValue) => onChange(newValue ?? '')}
-      options={{
-        minimap: { enabled: false },
-        fontSize: 13,
-        automaticLayout: true
-      }}
-    />
-  )
+/**
+ * Imperative handle exposed via ref, for callers that need to push new
+ * content into the SAME live document without remounting Monaco (Phase 11)
+ * — e.g. an AI "Improve" result, which keeps the project's existing id.
+ */
+export interface MonacoEditorPanelHandle {
+  /**
+   * Replaces the entire buffer with `newValue` via the editor's own
+   * executeEdits()/pushUndoStop() APIs rather than Editor's `defaultValue`
+   * (which is inert after mount) or a raw model.setValue() (which would
+   * wipe the undo stack). The edit lands as a single undoable operation —
+   * Ctrl+Z reverts to the prior content, exactly like an in-editor paste.
+   * No-op if the editor has not mounted yet.
+   */
+  replaceContent: (newValue: string) => void
 }
+
+export const MonacoEditorPanel = React.forwardRef<MonacoEditorPanelHandle, MonacoEditorPanelProps>(
+  function MonacoEditorPanel({ value, documentId, onChange }, ref) {
+    const editorRef = React.useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
+
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        replaceContent: (newValue: string) => {
+          const editor = editorRef.current
+          const model = editor?.getModel()
+          if (!editor || !model) return
+
+          editor.executeEdits('ai-generation', [{ range: model.getFullModelRange(), text: newValue }])
+          editor.pushUndoStop()
+        }
+      }),
+      []
+    )
+
+    return (
+      <Editor
+        key={documentId}
+        height="100%"
+        defaultLanguage="cpp"
+        defaultValue={value}
+        theme="vs-dark"
+        onMount={(editor) => {
+          editorRef.current = editor
+        }}
+        onChange={(newValue) => onChange(newValue ?? '')}
+        options={{
+          minimap: { enabled: false },
+          fontSize: 13,
+          automaticLayout: true
+        }}
+      />
+    )
+  }
+)

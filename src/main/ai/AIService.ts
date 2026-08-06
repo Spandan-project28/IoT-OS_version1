@@ -80,10 +80,40 @@ import { AIClient } from './AIClient'
 import { MockAIClient } from './MockAIClient'
 import { ResponseParser } from './ResponseParser'
 import { ResponseValidator } from './ResponseValidator'
+import { AiEventBus } from './AiEventBus'
 import { nanoid } from 'nanoid'
 import type { IAIGenerateRequest, IAIProviderConfig, IAIResult } from '@shared/types/ai'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
 import type { IResolvedAiSettings } from '@shared/types/settings'
+
+// ---------------------------------------------------------------------------
+// Integrated Terminal streaming (Phase 11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Emits a single Integrated Terminal log entry to AiEventBus, stamped with
+ * the moment it was produced. The IPC layer forwards this to the Renderer
+ * in real time via the ai:log push channel — see aiIpcHandlers.ts.
+ */
+function emitLog(stream: 'command' | 'stdout' | 'stderr', text: string): void {
+  AiEventBus.emit('ai:log', { stream, text, timestamp: Date.now() })
+}
+
+/**
+ * Formats a complete technical error block for the Integrated Terminal,
+ * matching the "ERROR / <message> / URL: / <url> / Body: / <body>" shape —
+ * never a paraphrase, always the full provider response as received.
+ */
+function formatErrorBlock(message: string, url?: string, body?: string): string {
+  const lines = ['ERROR', message]
+  if (url) {
+    lines.push('', 'URL:', url)
+  }
+  if (body) {
+    lines.push('', 'Body:', body)
+  }
+  return lines.join('\n')
+}
 
 // ---------------------------------------------------------------------------
 // Environment variable names
@@ -242,7 +272,11 @@ async function generate(
   request: IAIGenerateRequest,
   persisted: IResolvedAiSettings | null
 ): Promise<IAIResult> {
+  const isImprove = !!request.context?.currentFirmware
+
   try {
+    emitLog('command', isImprove ? 'Starting AI improvement...' : 'Starting AI generation...')
+
     // Step 1: Resolve provider configuration.
     // effectiveMock is true when:
     //   - Neither an environment variable nor a persisted setting supplies
@@ -250,11 +284,16 @@ async function generate(
     //   - AI_PROVIDER is explicitly set to 'mock' (developer override).
     const config = resolveProviderConfig(persisted)
     const effectiveMock = config === null || process.env[ENV_PROVIDER] === 'mock'
+    const providerName = resolveProviderName(effectiveMock)
+
+    emitLog('stdout', `Provider: ${providerName}`)
+    emitLog('stdout', `Model: ${config?.model ?? DEFAULT_MODEL}`)
+    emitLog('stdout', `Prompt: ${request.prompt}`)
 
     // Step 2: Build prompt. Branches to buildImprove() when the request
     // carries existing firmware to revise (Phase 8, Slice 37) — otherwise
     // builds a fresh-generation prompt exactly as before.
-    const prompt = request.context?.currentFirmware
+    const prompt = isImprove
       ? PromptBuilder.buildImprove(request)
       : PromptBuilder.buildGenerate(request)
 
@@ -270,11 +309,28 @@ async function generate(
       maxTokens: DEFAULT_MAX_TOKENS
     }
 
+    const endpoint = `${clientConfig.apiUrl}/chat/completions`
+
+    if (effectiveMock) {
+      emitLog('stdout', 'Using local mock response (no network request).')
+    } else {
+      emitLog('stdout', 'Sending request...')
+      emitLog('stdout', `URL: ${endpoint}`)
+    }
+
+    const requestStartedAt = Date.now()
     const clientResult = effectiveMock
       ? await MockAIClient.send(prompt.system, prompt.user, clientConfig)
       : await AIClient.send(prompt.system, prompt.user, clientConfig)
+    const requestDurationMs = Date.now() - requestStartedAt
 
     if (clientResult.status === 'error') {
+      const detail = formatErrorBlock(
+        clientResult.message,
+        effectiveMock ? undefined : endpoint,
+        clientResult.body
+      )
+      emitLog('stderr', detail)
       return {
         status: 'error',
         code: clientResult.code,
@@ -282,34 +338,50 @@ async function generate(
       }
     }
 
+    const statusPart = clientResult.httpStatus ? `HTTP ${clientResult.httpStatus}, ` : ''
+    emitLog('stdout', `Response received. (${statusPart}${requestDurationMs}ms)`)
+
     // Step 4: Parse the raw text
+    emitLog('stdout', 'Parsing firmware...')
     const parsed = ResponseParser.parse(clientResult.rawText)
 
     if (parsed === null) {
+      const message =
+        'The AI provider returned a response that could not be parsed as JSON. ' +
+        'The model may have included unexpected formatting or exceeded the token limit.'
+      emitLog('stderr', formatErrorBlock(message, undefined, clientResult.rawText))
       return {
         status: 'error',
         code: 'invalid_json',
-        error:
-          'The AI provider returned a response that could not be parsed as JSON. ' +
-          'The model may have included unexpected formatting or exceeded the token limit.'
+        error: message
       }
     }
 
     // Step 5: Validate the parsed object
+    emitLog('stdout', 'Validating response...')
     const validation = ResponseValidator.validate(parsed)
 
     if (validation.status === 'invalid') {
+      const message =
+        `The AI response was missing required fields. ${validation.reason} ` +
+        'Try rephrasing your prompt with more detail about the hardware and expected behaviour.'
+      emitLog('stderr', formatErrorBlock(message, undefined, clientResult.rawText))
       return {
         status: 'error',
         code: 'schema_validation',
-        error:
-          `The AI response was missing required fields. ${validation.reason} ` +
-          'Try rephrasing your prompt with more detail about the hardware and expected behaviour.'
+        error: message
       }
     }
 
     // Step 6: Map to IProjectDocument
     const project = mapToProjectDocument(validation.response, request, config, effectiveMock)
+
+    const sizeBytes = Buffer.byteLength(project.firmware, 'utf-8')
+    const lineCount = project.firmware.split('\n').length
+    emitLog(
+      'stdout',
+      `Firmware generation completed. Generated "${project.title}" (${sizeBytes} bytes, ${lineCount} lines).`
+    )
 
     // Step 7: Return success
     return { status: 'success', project }
@@ -318,6 +390,7 @@ async function generate(
     // returns typed results rather than throwing. Documented here for clarity.
     const message = err instanceof Error ? err.message : String(err)
     console.error('[AIService] Unexpected error in generate():', message)
+    emitLog('stderr', formatErrorBlock(message))
 
     return {
       status: 'error',

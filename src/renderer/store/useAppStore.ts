@@ -39,9 +39,11 @@
  *   (Phase 10) — see the Terminal state lifecycle below for the streaming
  *   side of this.
  *
- * Terminal state lifecycle (Phase 10 — Integrated Terminal):
- *   initializeUploadTerminal() → subscribe to window.api.upload.onLog() push events
- *   disposeUploadTerminal()    → unsubscribe the push event handle
+ * Terminal state lifecycle (Phase 10 — Integrated Terminal; Phase 11 adds AI):
+ *   initializeUploadTerminal() → subscribe to window.api.upload.onLog() AND
+ *                                 window.api.ai.onLog() push events — both
+ *                                 domains stream into the same terminalLogs.
+ *   disposeUploadTerminal()    → unsubscribe both push event handles
  *   clearTerminal()            → clears terminalLogs
  *   setTerminalExpanded(bool)  → collapses/expands the dock
  *   toggleTerminalAutoScroll() → toggles the auto-scroll preference
@@ -59,17 +61,21 @@
  *   selectTemplate(t)  → maps ITemplateDefinition → IProjectDocument, stores in currentProjectDoc
  *   clearProject()     → resets currentProjectDoc and aiError to null
  *
- * AI state lifecycle:
- *   generateAiProject(request) → calls window.api.ai.generate(), stores a pendingAiCandidate
- *                                 (mode 'new') on success or sets aiError on failure. Never throws.
- *   improveAiProject(prompt)   → builds a request from currentProjectDoc, stores a
- *                                 pendingAiCandidate (mode 'improve') on success (Phase 8, Slice 37).
+ * AI state lifecycle (Phase 11 — auto-apply, no review gate):
+ *   generateAiProject(request) → calls window.api.ai.generate(); on success, applies the
+ *                                 result directly to currentProjectDoc (fresh id, Monaco
+ *                                 remounts) and sets aiSuccessMessage. On failure, sets
+ *                                 aiError/aiErrorCode — the full technical detail streams
+ *                                 to terminalLogs live via window.api.ai.onLog(), never
+ *                                 rendered in the assistant panel. Never throws.
+ *   improveAiProject(prompt)   → builds a request from currentProjectDoc; on success, applies
+ *                                 the result to currentProjectDoc IN PLACE (same id — Monaco
+ *                                 does not remount) and bumps aiLastAppliedRevision so the
+ *                                 Editor page pushes the new firmware into the live Monaco
+ *                                 model via executeEdits(), preserving undo/redo.
  *   cancelAiGeneration()       → soft-cancels an in-flight generate/improve call, resetting
  *                                 aiLoading immediately without waiting for the Main process
  *                                 (Phase 8, Slice 39).
- *   acceptAiCandidate()        → applies the pending candidate to currentProjectDoc; 'improve'
- *                                 mode preserves the original id/path, 'new' mode does not.
- *   discardAiCandidate()       → discards the pending candidate without applying it.
  *
  * Typical usage pattern:
  *   Call initializeHardware() once at the top-level component (AppProviders).
@@ -102,7 +108,7 @@ import type {
 } from '@shared/types/serial'
 import type { ITemplateDefinition, SupportedBoard } from '@shared/types/template'
 import type { IProjectDocument, IProjectMetadata } from '@shared/types/project'
-import type { IAIGenerateRequest, AIErrorCode } from '@shared/types/ai'
+import type { IAIGenerateRequest, AIErrorCode, IAILogPayload } from '@shared/types/ai'
 import type { IRecentProject, IProjectSavedPayload, IProjectDeleteResult } from '@shared/types/project-persistence'
 import type { IAiSettingsConfig, IAiSettingsSaveRequest, ISettingsSaveResult } from '@shared/types/settings'
 
@@ -204,43 +210,37 @@ export interface AppState {
   aiErrorCode: AIErrorCode | null
 
   /**
-   * The most recent successful AI generation result, awaiting explicit user
-   * confirmation before it can replace currentProjectDoc (Phase 8, Slice 36).
+   * Human-readable confirmation from the last successful generateAiProject()
+   * or improveAiProject() call (Phase 11).
    *
-   * Null until generateAiProject() succeeds. Populated instead of writing
-   * directly to currentProjectDoc — closes the data-loss bug where a
-   * successful generation would silently overwrite an active, dirty,
-   * unsaved project. Cleared by acceptAiCandidate(), discardAiCandidate(),
-   * or whenever the active project identity changes (clearProject(),
-   * selectTemplate(), openProject()) — a candidate generated against one
-   * project must never be accepted onto a different, subsequently active
-   * one.
+   * Null on startup, cleared at the start of each new generation, and set
+   * once the result has been applied to currentProjectDoc (and, for
+   * 'improve', pushed into the live Monaco model). Also cleared by
+   * clearProject(). The assistant panel renders this and nothing else on
+   * success — no project detail sections, no diff, no accept/discard.
    */
-  pendingAiCandidate: IProjectDocument | null
+  aiSuccessMessage: string | null
 
   /**
-   * The kind of pending candidate, or null when none is pending.
+   * Monotonically incrementing counter bumped by improveAiProject() every
+   * time it successfully applies a revision to the EXISTING currentProjectDoc
+   * (same id — Monaco does not remount via the key={documentId} strategy).
    *
-   * 'new' is produced by generateAiProject() — a fresh generation with no
-   * relationship to any prior project.
-   * 'improve' is produced by improveAiProject() (Phase 8, Slice 37) — a
-   * revision of the active project's existing firmware. acceptAiCandidate()
-   * branches on this value to decide whether accepting the candidate starts
-   * a new project identity ('new') or updates the existing one in place
-   * ('improve').
-   *
-   * Non-null if and only if pendingAiCandidate is non-null.
+   * The Editor page watches this value and, on change, imperatively pushes
+   * currentProjectDoc.firmware into the live Monaco model via
+   * MonacoEditorPanel's executeEdits()-based replaceContent(), which
+   * preserves undo/redo. generateAiProject()'s 'new' case never bumps this —
+   * a fresh project gets a fresh id, so Monaco remounts naturally instead.
    */
-  pendingAiCandidateMode: 'new' | 'improve' | null
+  aiLastAppliedRevision: number
 
   /**
    * True once the active project has unsaved edits.
    *
-   * False immediately after selectTemplate(), generateAiProject(), or
+   * False immediately after selectTemplate(), a fresh generateAiProject(), or
    * clearProject() — a freshly loaded (or absent) project is never dirty.
    * Set to true by the first updateFirmware() call after a document is
-   * (re)loaded. Nothing in Slice 29 ever resets it back to false — that
-   * begins with Save in Slice 30.
+   * (re)loaded, and by improveAiProject() applying a revision in place.
    */
   projectDirty: boolean
 
@@ -436,20 +436,24 @@ export interface AppState {
   lastUploadedPort: string | null
 
   // -------------------------------------------------------------------------
-  // Integrated Terminal State (Phase 10)
+  // Integrated Terminal State (Phase 10; Phase 11 adds AI)
   //
-  // Backs the bottom-docked terminal shown by the Run/Upload workflow.
+  // Backs the bottom-docked terminal shown by the Run/Upload/AI workflows.
   // Populated by initializeUploadTerminal() via window.api.upload.onLog()
-  // push events, plus synthetic 'system' entries appended locally by the
-  // compile/upload actions to report final outcome.
+  // AND window.api.ai.onLog() push events, plus synthetic 'system' entries
+  // appended locally to report final outcome. IUploadLogPayload and
+  // IAILogPayload are structurally identical ({stream, text, timestamp}) —
+  // kept as independent per-domain types (matching this file's AIErrorCode
+  // vs UploadErrorCode convention) but rendered by the same terminal.
   // -------------------------------------------------------------------------
 
   /**
    * Ordered log entries shown in the Integrated Terminal.
    * Cleared at the start of every compileFirmware/uploadFirmware/
-   * compileAndUploadFirmware call, or manually via clearTerminal().
+   * compileAndUploadFirmware/generateAiProject/improveAiProject call, or
+   * manually via clearTerminal().
    */
-  terminalLogs: IUploadLogPayload[]
+  terminalLogs: Array<IUploadLogPayload | IAILogPayload>
 
   /**
    * True when the terminal dock is expanded. Set true automatically at the
@@ -517,17 +521,25 @@ export interface AppState {
   // -------------------------------------------------------------------------
 
   /**
-   * Generates firmware from a natural-language prompt.
+   * Generates firmware from a natural-language prompt (Phase 11: auto-apply,
+   * no review gate — see the AI state lifecycle doc comment at the top of
+   * this file).
    *
    * Pipeline (all executed in the Main process via IPC):
    *   PromptBuilder → AIClient/MockAIClient → ResponseParser → ResponseValidator
    *   → IProjectDocument
+   * Every step streams live to terminalLogs via window.api.ai.onLog() —
+   * see initializeUploadTerminal().
    *
    * Lifecycle:
-   *   1. Sets aiLoading = true and clears aiError.
+   *   1. Sets aiLoading = true, clears aiError/aiErrorCode/aiSuccessMessage.
    *   2. Calls window.api.ai.generate(request).
-   *   3a. On success: stores the returned IProjectDocument in currentProjectDoc.
-   *   3b. On typed error: sets aiError to the user-facing error message.
+   *   3a. On success: replaces currentProjectDoc with the returned
+   *       IProjectDocument (fresh id — Monaco remounts), sets
+   *       aiSuccessMessage, and appends a terminal system log.
+   *   3b. On typed error: sets aiError/aiErrorCode. The full technical
+   *       detail was already streamed to terminalLogs by AIService as it
+   *       happened — this field is never rendered as a banner in the UI.
    *   3c. On IPC transport failure: captures the thrown error in aiError.
    *   4. Always sets aiLoading = false in finally.
    *
@@ -540,19 +552,21 @@ export interface AppState {
 
   /**
    * Requests an AI-assisted revision of the active project's firmware
-   * (Phase 8, Slice 37).
+   * (Phase 8, Slice 37; auto-applied in place since Phase 11).
    *
    * No-op (no IPC call, no state change) if currentProjectDoc is null —
    * there is nothing to improve. Otherwise builds an IAIGenerateRequest from
    * the active project (boardHint, and context.currentFirmware /
-   * context.currentExplanation) and shares the exact same underlying
-   * pipeline, loading/error lifecycle, and pending-candidate guard as
-   * generateAiProject — the only difference is the resulting candidate is
-   * stored with pendingAiCandidateMode: 'improve' instead of 'new'.
+   * context.currentExplanation) and shares generateAiProject()'s pipeline
+   * and loading/error lifecycle. On success, unlike generateAiProject(),
+   * the result is merged into currentProjectDoc IN PLACE — re-stamped with
+   * the original project's id so Monaco does not remount — and
+   * aiLastAppliedRevision is bumped so the Editor page pushes the new
+   * firmware into the live Monaco model via executeEdits(), preserving
+   * undo/redo. projectDirty is set true and an autosave is scheduled,
+   * exactly as updateFirmware() already does.
    *
-   * Never throws into React. currentProjectDoc is left completely untouched
-   * until the resulting candidate is explicitly accepted via
-   * acceptAiCandidate().
+   * Never throws into React.
    *
    * @param prompt - The natural-language improvement instruction.
    */
@@ -572,9 +586,7 @@ export interface AppState {
    * is not an error, mirroring the existing "cancelled Save As is not an
    * error" precedent (saveAsProject(), Slice 30, Ambiguity B).
    *
-   * Pure synchronous action. No IPC. currentProjectDoc and pendingAiCandidate
-   * are untouched — a candidate can never exist yet for a call this cancels,
-   * since pendingAiCandidate is only ever set after a request completes.
+   * Pure synchronous action. No IPC. currentProjectDoc is untouched.
    */
   cancelAiGeneration: () => void
 
@@ -582,12 +594,11 @@ export interface AppState {
    * Clears the active project, resetting all project-related state to null.
    *
    * Resets:
-   * - currentProjectDoc      → null
-   * - aiError                → null
-   * - projectDirty           → false
-   * - currentProjectPath     → null
-   * - pendingAiCandidate     → null
-   * - pendingAiCandidateMode → null
+   * - currentProjectDoc  → null
+   * - aiError            → null
+   * - aiSuccessMessage   → null
+   * - projectDirty       → false
+   * - currentProjectPath → null
    *
    * Also cancels any pending autosave debounce (Phase 7, Slice 32) — the
    * active project is changing, so a timer scheduled against it must never
@@ -597,40 +608,6 @@ export interface AppState {
    * indicator should remain until the operation completes.
    */
   clearProject: () => void
-
-  // -------------------------------------------------------------------------
-  // AI Candidate Review Actions (Phase 8, Slice 36)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Accepts the pending AI candidate, replacing currentProjectDoc with it.
-   *
-   * No-op if pendingAiCandidate is null.
-   *
-   * Cancels any pending autosave debounce first — the active project is
-   * about to change, so a timer scheduled against the outgoing project must
-   * never fire against the newly accepted one.
-   *
-   * Sets currentProjectDoc to the candidate, projectDirty = false,
-   * currentProjectPath = null — identical to the values generateAiProject()
-   * used to set directly before this slice. Clears pendingAiCandidate and
-   * pendingAiCandidateMode.
-   *
-   * Pure synchronous action. No IPC. No side effects beyond the store.
-   */
-  acceptAiCandidate: () => void
-
-  /**
-   * Discards the pending AI candidate without applying it.
-   *
-   * No-op if pendingAiCandidate is null. Touches nothing except
-   * pendingAiCandidate and pendingAiCandidateMode — currentProjectDoc,
-   * projectDirty, currentProjectPath, and any running autosave debounce are
-   * left completely untouched.
-   *
-   * Pure synchronous action. No IPC. No side effects beyond the store.
-   */
-  discardAiCandidate: () => void
 
   // -------------------------------------------------------------------------
   // AI Configuration Actions (Phase 8, Slice 35)
@@ -1011,11 +988,12 @@ export interface AppState {
   // -------------------------------------------------------------------------
 
   /**
-   * Subscribes to window.api.upload.onLog() push events, appending each
-   * entry to terminalLogs.
+   * Subscribes to window.api.upload.onLog() AND window.api.ai.onLog() push
+   * events (Phase 11), appending each entry to the same terminalLogs array —
+   * the Integrated Terminal is shared by both domains.
    *
-   * The unsubscribe handle is stored in a module-level private variable,
-   * not in the store — it is a runtime resource, not application state.
+   * Both unsubscribe handles are stored in module-level private variables,
+   * not in the store — they are runtime resources, not application state.
    *
    * Safe to call multiple times — subsequent calls are no-ops (mirrors
    * initializeSerial()'s guard pattern).
@@ -1023,7 +1001,7 @@ export interface AppState {
   initializeUploadTerminal: () => void
 
   /**
-   * Removes the upload:log push subscription.
+   * Removes both the upload:log and ai:log push subscriptions.
    * Call this in the application root cleanup (e.g. on unmount or quit).
    * terminalLogs itself is NOT reset so the terminal does not flicker if
    * the component briefly unmounts and remounts.
@@ -1139,8 +1117,8 @@ export interface AppState {
    * no generator/provider/model — those are AI-only), constructs a fresh
    * IProjectDocument with a new id and schemaVersion 1, cancels any pending
    * autosave debounce, then replaces currentProjectDoc and resets
-   * aiError / projectDirty / currentProjectPath / pendingAiCandidate /
-   * pendingAiCandidateMode in a single atomic set() call.
+   * aiError / aiSuccessMessage / projectDirty / currentProjectPath in a
+   * single atomic set() call.
    *
    * Pure synchronous action. No IPC. No validation of `name` — the caller
    * (the Create New Project dialog, Slice 4) is responsible for supplying a
@@ -1171,6 +1149,12 @@ let _hardwareUnsubscribe: (() => void) | null = null
  * Null until initializeUploadTerminal() has been called.
  */
 let _uploadLogUnsubscribe: (() => void) | null = null
+
+/**
+ * Unsubscribe handle for window.api.ai.onLog() (Phase 11).
+ * Null until initializeUploadTerminal() has been called.
+ */
+let _aiLogUnsubscribe: (() => void) | null = null
 
 /**
  * Appends a synthetic 'system' entry to terminalLogs — used by the
@@ -1278,28 +1262,26 @@ function scheduleAutosave(delayMs: number, getStore: () => AppState): void {
 }
 
 /**
- * Shared internal helper (Phase 8, Slice 37): runs the AI generation pipeline
- * common to both generateAiProject() and improveAiProject() — the
- * pending-candidate guard, the preload-availability guard, the
- * aiLoading/aiError/aiErrorCode lifecycle, and the pending-candidate
- * assignment on success. The only difference between the two callers is the
- * constructed IAIGenerateRequest and the `mode` tag applied to a successful
- * result.
+ * Shared internal helper (Phase 11): runs the AI generation pipeline common
+ * to both generateAiProject() and improveAiProject() — the
+ * preload-availability guard, the aiLoading/aiError/aiErrorCode/
+ * aiSuccessMessage lifecycle, the terminal reset/streaming, and the direct
+ * application of a successful result to currentProjectDoc. The only
+ * difference between the two callers is the constructed IAIGenerateRequest
+ * and the `mode` tag, which decides whether the result replaces
+ * currentProjectDoc wholesale ('new') or is merged into it in place
+ * ('improve').
  *
  * Extracted so improveAiProject() does not duplicate this logic — reuse,
  * not duplication, matching this file's existing scheduleAutosave()
  * extraction (Slice 34).
  */
 async function runAiGeneration(
-  set: (partial: Partial<AppState>) => void,
+  set: (partial: Partial<AppState> | ((state: AppState) => Partial<AppState>)) => void,
   get: () => AppState,
   request: IAIGenerateRequest,
   mode: 'new' | 'improve'
 ): Promise<void> {
-  // Guard: a candidate is already pending review — must be resolved
-  // (accepted or discarded) before a new generation can start.
-  if (get().pendingAiCandidate) return
-
   // Guard: preload bridge must be available
   if (!window.api?.ai) {
     set({ aiError: 'AI API is not available.', aiErrorCode: null, aiLoading: false })
@@ -1310,23 +1292,67 @@ async function runAiGeneration(
   // cancelAiGeneration() bumps _aiGenerationToken, orphaning this call so
   // its eventual response is discarded rather than applied.
   const token = ++_aiGenerationToken
-  set({ aiLoading: true, aiError: null, aiErrorCode: null })
+
+  // Fresh terminal for this run — matches compileFirmware()/uploadFirmware()'s
+  // pattern of clearing + auto-expanding at the start of every operation.
+  set({
+    aiLoading: true,
+    aiError: null,
+    aiErrorCode: null,
+    aiSuccessMessage: null,
+    terminalLogs: [],
+    terminalExpanded: true
+  })
 
   try {
     const result = await window.api.ai.generate(request)
     if (_aiGenerationToken !== token) return // cancelled — discard silently
 
     if (result.status === 'success') {
-      // currentProjectDoc is deliberately left untouched here — see
-      // acceptAiCandidate() for where the active project actually changes.
-      set({ pendingAiCandidate: result.project, pendingAiCandidateMode: mode })
+      const { currentProjectDoc } = get()
+
+      if (mode === 'improve' && currentProjectDoc) {
+        // Improve updates the existing project in place: re-stamp the
+        // result with the original project's id so Monaco does not remount
+        // (see MonacoEditorPanel's key={documentId} strategy) — the new
+        // firmware is instead pushed into the live model via executeEdits()
+        // by the Editor page, keyed off aiLastAppliedRevision, preserving
+        // undo/redo. Content differs from what's on disk, so the project is
+        // dirty and an autosave is scheduled, exactly as updateFirmware()
+        // already does.
+        cancelPendingAutosave()
+        const updatedDoc: IProjectDocument = { ...result.project, id: currentProjectDoc.id }
+
+        set({
+          currentProjectDoc: updatedDoc,
+          projectDirty: true,
+          aiSuccessMessage: '✓ Firmware generated successfully.',
+          aiLastAppliedRevision: get().aiLastAppliedRevision + 1
+        })
+        appendTerminalSystemLog(set, '✓ Firmware generated successfully.\nEditor updated.')
+        scheduleAutosave(AUTOSAVE_DEBOUNCE_MS, get)
+      } else {
+        // 'new' mode (or 'improve' with no active project to merge into):
+        // the result's own freshly minted id is adopted — Monaco remounts
+        // naturally via key={documentId}, so no imperative edit is needed.
+        cancelPendingAutosave()
+        set({
+          currentProjectDoc: result.project,
+          projectDirty: false,
+          currentProjectPath: null,
+          aiSuccessMessage: '✓ Firmware generated successfully.'
+        })
+        appendTerminalSystemLog(set, '✓ Firmware generated successfully.\nEditor updated.')
+      }
     } else {
       set({ aiError: result.error, aiErrorCode: result.code })
+      appendTerminalSystemLog(set, `✗ Generation failed: ${result.error}`)
     }
   } catch (err: unknown) {
     if (_aiGenerationToken !== token) return // cancelled — discard silently
     const message = err instanceof Error ? err.message : 'AI generation failed unexpectedly.'
     set({ aiError: message })
+    appendTerminalSystemLog(set, `✗ Generation failed: ${message}`)
   } finally {
     // Only reset aiLoading if this call still owns the current token — an
     // orphaned call's finally must never clobber a newer call's loading
@@ -1357,8 +1383,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   aiLoading: false,
   aiError: null,
   aiErrorCode: null,
-  pendingAiCandidate: null,
-  pendingAiCandidateMode: null,
+  aiSuccessMessage: null,
+  aiLastAppliedRevision: 0,
   projectDirty: false,
   currentProjectPath: null,
   projectSaving: false,
@@ -1579,20 +1605,29 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   initializeUploadTerminal: () => {
     // Guard: prevent duplicate subscriptions
-    if (_uploadLogUnsubscribe !== null) return
+    if (_uploadLogUnsubscribe === null && window.api?.upload) {
+      _uploadLogUnsubscribe = window.api.upload.onLog((payload: IUploadLogPayload) => {
+        set((state) => ({ terminalLogs: [...state.terminalLogs, payload] }))
+      })
+    }
 
-    // Guard: preload bridge must be available
-    if (!window.api?.upload) return
-
-    _uploadLogUnsubscribe = window.api.upload.onLog((payload: IUploadLogPayload) => {
-      set((state) => ({ terminalLogs: [...state.terminalLogs, payload] }))
-    })
+    // AI generation streams into the same terminalLogs array (Phase 11) —
+    // one Integrated Terminal, both domains.
+    if (_aiLogUnsubscribe === null && window.api?.ai) {
+      _aiLogUnsubscribe = window.api.ai.onLog((payload: IAILogPayload) => {
+        set((state) => ({ terminalLogs: [...state.terminalLogs, payload] }))
+      })
+    }
   },
 
   disposeUploadTerminal: () => {
     if (_uploadLogUnsubscribe) {
       _uploadLogUnsubscribe()
       _uploadLogUnsubscribe = null
+    }
+    if (_aiLogUnsubscribe) {
+      _aiLogUnsubscribe()
+      _aiLogUnsubscribe = null
     }
   },
 
@@ -1828,10 +1863,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearProject: () => {
     // Resets all project-related state atomically.
-    // currentProjectDoc, aiError, projectDirty, and currentProjectPath are
-    // cleared together because they all describe the same concept: the
-    // currently active project. There is nothing to be dirty or have a path
-    // when there is no project.
+    // currentProjectDoc, aiError, aiSuccessMessage, projectDirty, and
+    // currentProjectPath are cleared together because they all describe the
+    // same concept: the currently active project. There is nothing to be
+    // dirty or have a path when there is no project.
     //
     // aiLoading is intentionally NOT reset here — if a generation is in progress,
     // the loading indicator must remain until the operation's finally block fires.
@@ -1843,60 +1878,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       currentProjectDoc: null,
       aiError: null,
+      aiSuccessMessage: null,
       projectDirty: false,
-      currentProjectPath: null,
-      pendingAiCandidate: null,
-      pendingAiCandidateMode: null
+      currentProjectPath: null
     })
-  },
-
-  // -------------------------------------------------------------------------
-  // AI Candidate Review Actions (Phase 8, Slice 36; extended Slice 37)
-  // -------------------------------------------------------------------------
-
-  acceptAiCandidate: () => {
-    const { pendingAiCandidate, pendingAiCandidateMode, currentProjectDoc } = get()
-    if (!pendingAiCandidate) return
-
-    // The active project is changing — cancel any pending autosave debounce
-    // so it can never fire against the project being replaced/updated now.
-    cancelPendingAutosave()
-
-    if (pendingAiCandidateMode === 'improve' && currentProjectDoc) {
-      // Improve updates the existing project in place (Phase 8, Slice 37):
-      // re-stamp the candidate with the original project's id and leave
-      // currentProjectPath untouched, matching IProjectDocument.id's own
-      // documented contract that it is never regenerated on save, rename,
-      // autosave, or reload. The content differs from what's on disk, so
-      // the project is now dirty and an autosave is scheduled exactly as
-      // updateFirmware() already does.
-      const updatedDoc: IProjectDocument = { ...pendingAiCandidate, id: currentProjectDoc.id }
-
-      set({
-        currentProjectDoc: updatedDoc,
-        projectDirty: true,
-        pendingAiCandidate: null,
-        pendingAiCandidateMode: null
-      })
-
-      scheduleAutosave(AUTOSAVE_DEBOUNCE_MS, get)
-      return
-    }
-
-    // 'new' mode: identical to the pre-Slice-37 behavior — the candidate's
-    // own freshly minted id is adopted and there is no prior save path.
-    set({
-      currentProjectDoc: pendingAiCandidate,
-      projectDirty: false,
-      currentProjectPath: null,
-      pendingAiCandidate: null,
-      pendingAiCandidateMode: null
-    })
-  },
-
-  discardAiCandidate: () => {
-    if (!get().pendingAiCandidate) return
-    set({ pendingAiCandidate: null, pendingAiCandidateMode: null })
   },
 
   // -------------------------------------------------------------------------
@@ -1989,15 +1974,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({
       currentProjectDoc: projectDoc,
-      // Clear any stale AI error from a previous generation attempt.
+      // Clear any stale AI status from a previous generation attempt.
       aiError: null,
+      aiSuccessMessage: null,
       // A freshly selected template is never dirty and has no saved path.
       projectDirty: false,
-      currentProjectPath: null,
-      // A pending candidate belongs to whatever project was active before —
-      // it must never be accepted onto this newly selected template.
-      pendingAiCandidate: null,
-      pendingAiCandidateMode: null
+      currentProjectPath: null
     })
   },
 
@@ -2035,15 +2017,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({
       currentProjectDoc: projectDoc,
-      // Clear any stale AI error from a previous generation attempt.
+      // Clear any stale AI status from a previous generation attempt.
       aiError: null,
+      aiSuccessMessage: null,
       // A freshly created manual project is never dirty and has no saved path.
       projectDirty: false,
-      currentProjectPath: null,
-      // A pending candidate belongs to whatever project was active before —
-      // it must never be accepted onto this newly created project.
-      pendingAiCandidate: null,
-      pendingAiCandidateMode: null
+      currentProjectPath: null
     })
   },
 
@@ -2291,10 +2270,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastSaveType: null,
           lastSavedAt: result.savedAt,
           projectOpenError: null,
-          // A pending candidate belongs to whatever project was active
-          // before — it must never be accepted onto this newly opened one.
-          pendingAiCandidate: null,
-          pendingAiCandidateMode: null
+          // Clear any stale AI status from whatever project was active before.
+          aiError: null,
+          aiSuccessMessage: null
         })
       } else {
         set({ projectOpenError: result.error })

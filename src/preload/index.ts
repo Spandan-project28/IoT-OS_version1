@@ -25,7 +25,7 @@ import type {
   ISerialStatusPayload,
   ISerialResult
 } from '@shared/types/serial'
-import type { IAIGenerateRequest, IAIResult } from '@shared/types/ai'
+import type { IAIGenerateRequest, IAIResult, IAILogPayload } from '@shared/types/ai'
 import type {
   IProjectOpenRequest,
   IProjectOpenResult,
@@ -263,7 +263,9 @@ const serialApi = {
 //
 // Architectural rules:
 // - Thin bridge only — no business logic.
-// - generate is an invoke/response channel (no push events in V0.1).
+// - generate is an invoke/response channel.
+// - onLog subscribes to the ai:log push channel (Phase 11) and returns an
+//   unsubscribe function, exactly like upload.onLog().
 // - Types flow from @shared/types/ai — no duplication.
 // - IAIProviderConfig is NEVER exposed here. The Renderer never knows which
 //   provider or model is configured — it only receives IAIResult.
@@ -271,6 +273,8 @@ const serialApi = {
 // Channels:
 //   ai.generate(request) — invoke ai:generate
 //                          returns Promise<IAIResult>
+//   ai.onLog(cb)          — subscribe to ai:log push events
+//                          returns () => void unsubscribe function
 // ---------------------------------------------------------------------------
 
 const aiApi = {
@@ -288,7 +292,27 @@ const aiApi = {
    * failures are returned as typed IAIResult values.
    */
   generate: (request: IAIGenerateRequest): Promise<IAIResult> =>
-    ipcRenderer.invoke(AiIpcChannels.generate, request) as Promise<IAIResult>
+    ipcRenderer.invoke(AiIpcChannels.generate, request) as Promise<IAIResult>,
+
+  /**
+   * Subscribes to ai:log push events from the Main process.
+   *
+   * Called for every step of the generation pipeline — provider/model/prompt,
+   * request/response milestones, parsing/validation progress, and complete
+   * provider errors — in real time, never batched until ai:generate resolves.
+   *
+   * @param callback - Called with IAILogPayload on each push.
+   * @returns An unsubscribe function. Call it in useEffect cleanup.
+   */
+  onLog: (callback: (payload: IAILogPayload) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: IAILogPayload): void => {
+      callback(payload)
+    }
+    ipcRenderer.on(AiIpcChannels.log, handler)
+    return () => {
+      ipcRenderer.removeListener(AiIpcChannels.log, handler)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

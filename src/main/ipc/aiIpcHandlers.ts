@@ -27,19 +27,50 @@
  * Invoke channels handled here (Renderer → Main):
  *   ai:generate → AIService.generate(request, persisted)
  *
- * No push events in V0.1 — the generate flow is invoke/response only.
- * Streaming responses are deferred to a future performance phase.
+ * Push channels driven here (Main → Renderer):
+ *   ai:log → sent on every AiEventBus 'ai:log' event (Phase 11, Integrated Terminal)
  *
  * Lifecycle:
- *   aiIpcHandlers.register() — called once after app is ready.
- *   aiIpcHandlers.remove()   — called on app quit or window close.
+ *   aiIpcHandlers.register(mainWindow) — called once after app is ready.
+ *   aiIpcHandlers.remove()             — called on app quit or window close.
  */
 
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import { AIService } from '../ai/AIService'
+import { AiEventBus } from '../ai/AiEventBus'
 import { SettingsService } from '../services/SettingsService'
 import { AiIpcChannels } from '@shared/types/ipc'
-import type { IAIGenerateRequest } from '@shared/types/ai'
+import type { IAIGenerateRequest, IAILogPayload } from '@shared/types/ai'
+
+// ---------------------------------------------------------------------------
+// Internal state
+// ---------------------------------------------------------------------------
+
+/** Cached reference to the main BrowserWindow, used to send push events. */
+let _mainWindow: BrowserWindow | null = null
+
+/**
+ * The listener registered on AiEventBus('ai:log').
+ * Stored so it can be removed precisely during teardown without calling
+ * removeAllListeners() (which would discard other internal subscribers).
+ */
+let _logListener: ((payload: IAILogPayload) => void) | null = null
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends the ai:log push event to the Renderer if the window still exists
+ * and its webContents have not been destroyed.
+ *
+ * Guard conditions mirror uploadIpcHandlers.ts and hardwareIpcHandlers.ts.
+ */
+function pushLogToRenderer(payload: IAILogPayload): void {
+  if (_mainWindow && !_mainWindow.webContents.isDestroyed()) {
+    _mainWindow.webContents.send(AiIpcChannels.log, payload)
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -49,10 +80,15 @@ import type { IAIGenerateRequest } from '@shared/types/ai'
  * Registers all ipcMain handlers for the AI generation subsystem.
  *
  * Must be called exactly once during app startup, after the BrowserWindow
- * has been created. No window reference is needed — the ai:generate channel
- * is invoke/response only (no push events in V0.1).
+ * has been created. The window reference is required to send ai:log push
+ * events as AIService produces them (Phase 11, Integrated Terminal).
+ *
+ * @param mainWindow - The application's primary BrowserWindow. Required to
+ *   send push events (ai:log) to the Renderer.
  */
-function registerAiIpcHandlers(): void {
+function registerAiIpcHandlers(mainWindow: BrowserWindow): void {
+  _mainWindow = mainWindow
+
   // -------------------------------------------------------------------------
   // Invoke: ai:generate
   //
@@ -77,19 +113,39 @@ function registerAiIpcHandlers(): void {
     const persisted = SettingsService.getResolvedAiSettings()
     return AIService.generate(request, persisted)
   })
+
+  // -------------------------------------------------------------------------
+  // Push: ai:log
+  //
+  // Subscribe to the internal AiEventBus 'ai:log' event and forward it to
+  // the Renderer via webContents.send(). This makes the Integrated Terminal
+  // reactive to AI generation output without polling from the UI.
+  //
+  // One event per pipeline step — never batched until ai:generate resolves.
+  // -------------------------------------------------------------------------
+  _logListener = (payload: IAILogPayload) => {
+    pushLogToRenderer(payload)
+  }
+
+  AiEventBus.on('ai:log', _logListener)
 }
 
 /**
- * Removes all ipcMain handlers registered by this module.
+ * Removes all ipcMain handlers and AiEventBus listeners registered by this
+ * module.
  *
  * Must be called when the application is quitting to prevent stale handlers
  * from accumulating across hot-reloads in development.
- *
- * No additional cleanup is needed — the AI subsystem has no persistent
- * sessions, open file handles, or OS-level resources to release.
  */
 function removeAiIpcHandlers(): void {
   ipcMain.removeHandler(AiIpcChannels.generate)
+
+  if (_logListener) {
+    AiEventBus.off('ai:log', _logListener)
+    _logListener = null
+  }
+
+  _mainWindow = null
 }
 
 // ---------------------------------------------------------------------------
